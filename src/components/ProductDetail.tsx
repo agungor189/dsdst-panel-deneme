@@ -1,0 +1,278 @@
+import { useState, useEffect } from 'react';
+import { 
+  ArrowLeft, 
+  Edit3, 
+  Trash2, 
+  Package, 
+  TrendingUp, 
+  TrendingDown, 
+  Plus, 
+  Minus,
+  MessageSquare,
+  Copy,
+  ExternalLink,
+  History,
+  Info,
+} from 'lucide-react';
+import { api, formatCurrency, PLATFORMS } from '../lib/api';
+import { Product, ProductPlatform } from '../types';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+interface ProductDetailProps {
+  productId: string;
+  onBack: () => void;
+  onEdit: () => void;
+}
+
+export default function ProductDetail({ productId, onBack, onEdit }: ProductDetailProps) {
+  const [product, setProduct] = useState<Product | null>(null);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [stockLogs, setStockLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadData();
+  }, [productId]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const data = await api.get(`/products/${productId}`);
+      const logs = await api.get(`/stock/movements/${productId}`);
+      setProduct(data);
+      setStockLogs(logs);
+      if (data.images?.length > 0) setActiveImage(data.images[0].path);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const adjustStock = async (platform: string, delta: number) => {
+    try {
+       await api.post('/stock/adjust', {
+         product_id: productId,
+         platform_name: platform,
+         change_amount: delta,
+         reason: delta > 0 ? "Manuel giriş" : "Manuel çıkış"
+       });
+       loadData();
+    } catch (err) {
+       alert("Stok güncellenemedi");
+    }
+  };
+
+  const deleteProduct = async () => {
+    if (confirm("Bu ürünü silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
+      try {
+        await api.delete(`/products/${productId}`);
+        onBack();
+      } catch (err) {
+        alert("Silme işlemi başarısız.");
+      }
+    }
+  };
+
+  if (loading || !product) return (
+    <div className="flex flex-col items-center justify-center py-24 space-y-4">
+      <div className="w-12 h-12 border-4 border-[#0F172A]/10 border-t-[#0F172A] rounded-full animate-spin"></div>
+      <p className="text-sm font-bold text-[#64748B]">Yükleniyor...</p>
+    </div>
+  );
+
+  const profit = product.sale_price - product.purchase_cost;
+  const margin = ((profit / product.sale_price) * 100).toFixed(1);
+
+  return (
+    <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+      {/* Top Bar */}
+      <div className="flex items-center justify-between">
+         <button 
+           onClick={onBack}
+           className="flex items-center text-[#64748B] hover:text-[#0F172A] transition-colors p-2 -ml-2 rounded-lg hover:bg-[#F1F5F9]"
+         >
+           <ArrowLeft className="w-5 h-5 mr-2" />
+           <span className="font-bold text-sm">Listeye Dön</span>
+         </button>
+         <div className="flex items-center space-x-3">
+             <button 
+               onClick={onEdit}
+               className="flex items-center px-4 py-2 bg-[#0F172A] text-white rounded-xl font-bold text-sm hover:scale-105 transition-all shadow-md"
+             >
+               <Edit3 className="w-4 h-4 mr-2" />
+               Düzenle
+             </button>
+             <button 
+               onClick={deleteProduct}
+               className="p-2 border border-[#E2E8F0] text-rose-500 rounded-xl hover:bg-rose-50 transition-colors"
+             >
+               <Trash2 className="w-4 h-4" />
+             </button>
+         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Gallery */}
+        <div className="lg:col-span-1 space-y-4">
+           <div className="aspect-square bg-white border border-border-color rounded-2xl overflow-hidden shadow-sm relative p-8">
+              {activeImage ? (
+                <img src={activeImage} className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-bg-main">
+                   <Package className="w-16 h-16 text-border-color" />
+                </div>
+              )}
+              <div className="absolute top-4 right-4">
+                 <span className={cn(
+                   "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-tight border shadow-sm",
+                   product.status === 'Active' ? 'bg-success text-white border-success' : 'bg-text-muted text-white border-text-muted'
+                 )}>
+                   {product.status === 'Active' ? 'Satışta' : 'Pasif'}
+                 </span>
+              </div>
+           </div>
+           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {product.images?.map((img) => (
+                <button 
+                  key={img.id}
+                  onClick={() => setActiveImage(img.path)}
+                  className={cn(
+                    "w-16 h-16 flex-shrink-0 rounded-lg border-2 transition-all overflow-hidden p-1 bg-white",
+                    activeImage === img.path ? "border-primary" : "border-border-color opacity-60 hover:opacity-100"
+                  )}
+                >
+                  <img src={img.path} className="w-full h-full object-contain" />
+                </button>
+              ))}
+           </div>
+        </div>
+
+        {/* Info */}
+        <div className="lg:col-span-2 space-y-6">
+           <section className="card p-8 space-y-6">
+              <div>
+                <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">{product.category} / {product.model}</p>
+                <div className="flex items-center space-x-2">
+                   <h1 className="text-3xl font-extrabold text-text-main tracking-tight">{product.name}</h1>
+                   <span className="text-text-muted mt-1.5 font-medium">| {product.title}</span>
+                </div>
+                <div className="flex items-center space-x-4 mt-3">
+                  <div className="flex items-center bg-bg-main px-3 py-1 rounded border border-border-color text-[10px] font-mono font-bold text-text-muted uppercase">
+                    SKU: <span className="text-text-main ml-1.5">{product.sku}</span>
+                  </div>
+                  <div className="flex items-center bg-bg-main px-3 py-1 rounded border border-border-color text-[10px] font-mono font-bold text-text-muted uppercase">
+                    BAR: <span className="text-text-main ml-1.5">{product.barcode || '-'}</span>
+                  </div>
+                  {product.warehouse_location && (
+                    <div className="flex items-center bg-bg-main px-3 py-1 rounded border border-border-color text-[10px] font-bold text-text-muted uppercase">
+                      LOKASYON: <span className="text-primary ml-1.5">{product.warehouse_location}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 py-6 border-y border-border-color">
+                <DetailStat label="Satış Fiyatı" value={formatCurrency(product.sale_price)} color="text-text-main" />
+                <DetailStat label="Maliyet" value={formatCurrency(product.purchase_cost)} color="text-text-muted" />
+                <DetailStat 
+                  label="Kar Payı" 
+                  value={formatCurrency(profit)} 
+                  subLabel={`%${margin} Marj`} 
+                  color="text-success" 
+                />
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center"><Info className="w-4 h-4 mr-2" /> Ürün Açıklaması</h3>
+                <div className="text-sm text-text-muted leading-relaxed whitespace-pre-wrap bg-bg-main p-4 rounded-lg border border-border-color">
+                  {product.description || 'Açıklama girilmemiş.'}
+                </div>
+              </div>
+           </section>
+
+           <section className="card">
+             <div className="p-6 border-b border-border-color flex items-center justify-between">
+                <h3 className="font-bold text-text-main text-sm flex items-center">
+                  <Package className="w-4 h-4 mr-2 text-primary" />
+                  Stok Yönetimi
+                </h3>
+             </div>
+             <div className="p-10 flex flex-col items-center justify-center space-y-6">
+                <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Mevcut Toplam Stok</p>
+                <div className="flex items-center space-x-8">
+                   <button 
+                     onClick={() => adjustStock('Depo', -1)}
+                     className="w-16 h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-red-50 hover:text-danger transition-all active:scale-90 shadow-md group"
+                   >
+                     <Minus className="w-6 h-6 transition-transform group-hover:scale-110" />
+                   </button>
+                   <div className="flex flex-col items-center">
+                     <span className={cn(
+                       "text-6xl font-black tracking-tighter", 
+                       (product.total_stock || 0) < 10 ? "text-danger" : "text-text-main"
+                     )}>
+                       {product.total_stock}
+                     </span>
+                     <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-2">ADET</span>
+                   </div>
+                   <button 
+                     onClick={() => adjustStock('Depo', 1)}
+                     className="w-16 h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-green-50 hover:text-success transition-all active:scale-90 shadow-md group"
+                   >
+                     <Plus className="w-6 h-6 transition-transform group-hover:scale-110" />
+                   </button>
+                </div>
+                <div className="flex items-center space-x-2 text-[10px] font-bold text-text-muted bg-bg-main px-4 py-2 rounded-full border border-border-color uppercase tracking-widest">
+                   <div className={cn("w-2 h-2 rounded-full", product.total_stock > 0 ? "bg-success" : "bg-danger animate-pulse")}></div>
+                   {product.total_stock > 0 ? "Stokta Var" : "Stok Tükendi"}
+                </div>
+             </div>
+           </section>
+
+           <section className="card">
+              <div className="p-6 border-b border-border-color flex items-center space-x-2">
+                <History className="w-4 h-4 text-text-muted" />
+                <h3 className="font-bold text-text-main text-sm">Stok Hareket Geçmişi</h3>
+              </div>
+              <div className="divide-y divide-border-color max-h-[300px] overflow-y-auto">
+                 {stockLogs.map((log) => (
+                   <div key={log.id} className="flex items-center justify-between p-4 hover:bg-bg-main transition-colors">
+                      <div className="flex items-center space-x-4">
+                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", log.change_amount > 0 ? "bg-green-50 text-success border border-green-100" : "bg-red-50 text-danger border border-red-100")}>
+                           {log.change_amount > 0 ? <Plus className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-text-main">{log.platform_name}: <span className={log.change_amount > 0 ? 'text-success' : 'text-danger'}>{log.change_amount > 0 ? '+' : ''}{log.change_amount} Adet</span></p>
+                          <p className="text-[10px] text-text-muted font-bold uppercase tracking-tight">{log.reason}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase font-bold text-text-muted tracking-widest">{new Date(log.created_at).toLocaleDateString('tr-TR')}</p>
+                        <p className="text-[10px] uppercase font-bold text-text-muted tracking-widest opacity-60">{new Date(log.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</p>
+                      </div>
+                   </div>
+                 ))}
+                 {stockLogs.length === 0 && <div className="py-12 text-center italic text-text-muted text-sm px-6">Henüz bir hareket kaydı yok.</div>}
+              </div>
+           </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailStat({ label, value, subLabel, color }: { label: string, value: string, subLabel?: string, color: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider mb-2">{label}</p>
+      <p className={cn("text-2xl font-extrabold tracking-tight", color)}>{value}</p>
+      {subLabel && <p className="text-xs font-bold text-[#64748B] mt-1">{subLabel}</p>}
+    </div>
+  );
+}
