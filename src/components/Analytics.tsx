@@ -151,12 +151,12 @@ export default function Analytics({ settings }: { settings: Settings | null }) {
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-text-main tracking-tight">Akıllı Analizler</h2>
-          <p className="text-sm text-text-muted">Verilerinizi kazanca dönüştüren derinlemesine içgörüler.</p>
+          <h2 className="text-xl lg:text-2xl font-bold text-text-main tracking-tight">Akıllı Analizler</h2>
+          <p className="text-xs lg:text-sm text-text-muted">Verilerinizi kazanca dönüştüren derinlemesine içgörüler.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
         <StatCard 
           title="Toplam Gelir" 
           value={formatCurrency(totalIncome)} 

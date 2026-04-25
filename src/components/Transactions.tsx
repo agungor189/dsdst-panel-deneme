@@ -123,18 +123,18 @@ export default function Transactions({ initialType, settings }: { initialType?: 
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-[#0F172A] tracking-tight">
+          <h2 className="text-xl lg:text-2xl font-bold text-[#0F172A] tracking-tight">
             {initialType === 'Income' ? 'Gelir Takibi' : initialType === 'Expense' ? 'Gider Takibi' : 'Finansal İşlemler'}
           </h2>
-          <p className="text-sm text-[#64748B]">
+          <p className="text-xs lg:text-sm text-[#64748B]">
             {initialType === 'Income' ? 'Satış ve diğer gelirlerinizi yönetin.' : initialType === 'Expense' ? 'Kargo, komisyon ve maliyetlerinizi takip edin.' : 'İşlemleri ürün bazlı takip edin.'}
           </p>
         </div>
         <button 
           onClick={() => setShowAdd(true)}
-          className="flex items-center px-5 py-2.5 bg-[#0F172A] text-white rounded-xl font-bold text-sm shadow-lg shadow-gray-200 hover:scale-[1.02] transition-all"
+          className="flex items-center justify-center px-5 py-3 lg:py-2.5 bg-[#0F172A] text-white rounded-xl font-bold text-sm shadow-lg shadow-gray-200 hover:scale-[1.02] transition-all w-full sm:w-auto"
         >
           <Plus className="w-4 h-4 mr-2" />
           Yeni {initialType === 'Income' ? 'Gelir' : initialType === 'Expense' ? 'Gider' : 'İşlem'} Ekle
@@ -309,24 +309,24 @@ export default function Transactions({ initialType, settings }: { initialType?: 
 function TransactionRow({ tx, onDelete }: any) {
   return (
     <tr className="hover:bg-bg-main transition-colors group">
-      <td className="px-6 py-4 text-text-muted">{new Date(tx.date).toLocaleDateString('tr-TR')}</td>
-      <td className="px-6 py-4">
-        <p className="font-bold text-text-main">{tx.category}</p>
-        <p className="text-[10px] text-text-muted font-bold uppercase tracking-tighter">{tx.type === 'Income' ? 'Gelir' : 'Gider'}</p>
+      <td className="px-4 lg:px-6 py-4 text-text-muted text-xs lg:text-sm">{new Date(tx.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}</td>
+      <td className="px-4 lg:px-6 py-4">
+        <p className="font-bold text-text-main text-sm">{tx.category}</p>
+        <p className="text-[9px] lg:text-[10px] text-text-muted font-bold uppercase tracking-tighter">{tx.type === 'Income' ? 'Gelir' : 'Gider'}</p>
       </td>
-      <td className="px-6 py-4">
+      <td className="px-4 lg:px-6 py-4 hidden sm:table-cell">
         <span className="px-2 py-0.5 rounded bg-bg-main border border-border-color text-text-main text-[10px] font-bold uppercase tracking-tight">{tx.platform}</span>
       </td>
-      <td className={cn("px-6 py-4 font-bold text-base", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
+      <td className={cn("px-4 lg:px-6 py-4 font-bold text-sm lg:text-base", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
         {tx.type === 'Income' ? '+' : '-'}{formatCurrency(tx.amount)}
       </td>
-      <td className="px-6 py-4 max-w-[200px]">
-        <p className="text-xs font-medium text-text-muted truncate">{tx.product_title || '-'}</p>
+      <td className="px-4 lg:px-6 py-4 max-w-[120px] lg:max-w-[200px]">
+        <p className="text-[10px] lg:text-xs font-medium text-text-muted truncate">{tx.product_title || '-'}</p>
       </td>
-      <td className="px-6 py-4 text-right">
+      <td className="px-4 lg:px-6 py-4 text-right">
         <button 
           onClick={onDelete}
-          className="p-2 text-text-muted hover:text-danger hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+          className="p-2 text-text-muted hover:text-danger hover:bg-red-50 rounded-lg transition-all lg:opacity-0 lg:group-hover:opacity-100"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -337,13 +337,13 @@ function TransactionRow({ tx, onDelete }: any) {
 
 function SummaryCard({ title, value, color, bg, icon: Icon }: any) {
   return (
-    <div className={cn("p-6 rounded-2xl bg-white border border-[#E2E8F0] flex items-center justify-between shadow-sm")}>
+    <div className={cn("p-4 lg:p-6 rounded-2xl bg-white border border-[#E2E8F0] flex items-center justify-between shadow-sm")}>
        <div>
-         <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">{title}</p>
-         <p className={cn("text-2xl font-extrabold tracking-tight", color)}>{value}</p>
+         <p className="text-[9px] lg:text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">{title}</p>
+         <p className={cn("text-xl lg:text-2xl font-extrabold tracking-tight", color)}>{value}</p>
        </div>
-       <div className={cn("p-3 rounded-xl", bg)}>
-          <Icon className={cn("w-6 h-6", color)} />
+       <div className={cn("p-2 lg:p-3 rounded-xl", bg)}>
+          <Icon className={cn("w-5 h-5 lg:w-6 lg:h-6", color)} />
        </div>
     </div>
   );

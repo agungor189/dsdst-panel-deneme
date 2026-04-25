@@ -144,78 +144,79 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
 
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto pb-12">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-text-main tracking-tight">Ödeme Takvimi</h2>
-          <p className="text-sm text-text-muted">Aylık finansal yükümlülüklerinizi ve vadesi gelen ödemeleri takip edin.</p>
+          <h2 className="text-xl lg:text-2xl font-bold text-text-main tracking-tight">Ödeme Takvimi</h2>
+          <p className="text-xs lg:text-sm text-text-muted">Aylık finansal yükümlülüklerinizi ve vadesi gelen ödemeleri takip edin.</p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 sm:space-x-3 w-full sm:w-auto">
           <button 
             disabled={loading}
             onClick={processPayments}
-            className="flex items-center px-5 py-2.5 bg-success text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:scale-[1.02] transition-all disabled:opacity-50"
+            className="flex-1 sm:flex-none flex items-center justify-center px-4 sm:px-5 py-2.5 bg-success text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:scale-[1.02] transition-all disabled:opacity-50"
           >
             <CheckCircle2 className="w-4 h-4 mr-2" />
-            Ödemeleri İşle
+            <span className="truncate">Ödemeleri İşle</span>
           </button>
           <button 
             onClick={() => setShowAdd(true)}
-            className="flex items-center px-5 py-2.5 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-100 hover:scale-[1.02] transition-all"
+            className="flex-1 sm:flex-none flex items-center justify-center px-4 sm:px-5 py-2.5 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-100 hover:scale-[1.02] transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
-            Plan Ekle
+            <span className="truncate">Plan Ekle</span>
           </button>
         </div>
       </div>
 
       {/* Full Monthly Calendar */}
-      <div className="card shadow-2xl border-none overflow-hidden flex flex-col min-h-[800px] bg-white">
-        <div className="px-8 py-6 border-b border-border-color flex items-center justify-between bg-white">
-          <div className="flex items-center space-x-8">
-            <h3 className="text-2xl font-black text-text-main min-w-[220px]">{monthInfo.monthName}</h3>
-            <div className="flex items-center space-x-2 p-1 bg-bg-main rounded-2xl border border-border-color">
-              <button onClick={() => changeMonth(-1)} className="p-2.5 hover:bg-white hover:shadow-sm rounded-xl text-text-muted transition-all">
-                <ChevronLeft className="w-5 h-5" />
+      <div className="card shadow-2xl border-none overflow-hidden flex flex-col min-h-fit sm:min-h-[800px] bg-white">
+        <div className="px-5 lg:px-8 py-4 lg:py-6 border-b border-border-color flex flex-col sm:flex-row sm:items-center justify-between bg-white gap-4">
+          <div className="flex items-center justify-between sm:justify-start sm:space-x-8">
+            <h3 className="text-lg lg:text-2xl font-black text-text-main truncate sm:min-w-[220px]">{monthInfo.monthName}</h3>
+            <div className="flex items-center space-x-1 sm:space-x-2 p-1 bg-bg-main rounded-2xl border border-border-color">
+              <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-xl text-text-muted transition-all">
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button 
                 onClick={() => setViewDate(new Date())}
-                className="px-5 py-2 text-xs font-bold text-text-main hover:bg-white hover:shadow-sm rounded-xl transition-all"
+                className="px-3 sm:px-5 py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold text-text-main hover:bg-white hover:shadow-sm rounded-xl transition-all"
               >
                 Bugün
               </button>
-              <button onClick={() => changeMonth(1)} className="p-2.5 hover:bg-white hover:shadow-sm rounded-xl text-text-muted transition-all">
-                <ChevronRight className="w-5 h-5" />
+              <button onClick={() => changeMonth(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-xl text-text-muted transition-all">
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
           </div>
           
-          <div className="hidden sm:flex items-center space-x-8 text-[10px] font-bold text-text-muted uppercase tracking-[0.2em]">
-            <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-success mr-2.5 shadow-sm shadow-green-200"></div> İşlendi</div>
-            <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-amber-400 mr-2.5 shadow-sm shadow-amber-200"></div> Bekliyor</div>
+          <div className="flex items-center space-x-6 sm:space-x-8 text-[9px] sm:text-[10px] font-bold text-text-muted uppercase tracking-[0.1em] sm:tracking-[0.2em]">
+            <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-success mr-2 shadow-sm shadow-green-200"></div> İşlendi</div>
+            <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-amber-400 mr-2 shadow-sm shadow-amber-200"></div> Bekliyor</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-7 bg-bg-main border-b border-border-color">
+        <div className="hidden sm:grid grid-cols-7 bg-bg-main border-b border-border-color">
            {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map(d => (
              <div key={d} className="py-4 text-center text-[10px] font-black text-text-muted uppercase tracking-widest border-r border-border-color last:border-0">{d}</div>
            ))}
         </div>
 
-        <div className="flex-1 grid grid-cols-7 auto-rows-fr bg-[#F1F5F9] gap-[1px]">
+        <div className="flex-1 grid grid-cols-1 sm:grid-cols-7 auto-rows-fr bg-[#F1F5F9] gap-[1px]">
            {monthInfo.calendarDays.map((d, idx) => (
              <div 
                key={idx} 
                className={cn(
-                 "min-h-[140px] p-4 bg-white flex flex-col group transition-all duration-300 relative",
-                 d.blank ? "bg-bg-main/30" : "hover:bg-bg-main/50 cursor-pointer",
-                 d.current ? "bg-primary/5" : ""
+                 "p-4 bg-white flex flex-col group transition-all duration-300 relative",
+                 d.blank ? "bg-bg-main/30 hidden sm:flex" : "hover:bg-bg-main/50 cursor-pointer min-h-[100px] sm:min-h-[140px]",
+                 d.current ? "bg-primary/5" : "",
+                 !d.blank && d.payments && d.payments.length === 0 ? "hidden sm:flex" : ""
                )}
              >
                 {!d.blank && (
                   <>
                     <div className="flex justify-between items-start mb-3">
                       <span className={cn(
-                        "w-8 h-8 flex items-center justify-center rounded-xl text-xs font-black transition-all",
+                        "w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-xs font-black transition-all",
                         d.current ? "bg-primary text-white shadow-lg scale-110" : "text-text-muted group-hover:text-text-main"
                       )}>
                         {d.day}
@@ -229,7 +230,7 @@ export default function RecurringPayments({ settings }: { settings: Settings | n
                       )}
                     </div>
                     
-                    <div className="flex-1 space-y-1.5 overflow-y-auto max-h-[120px] custom-scrollbar">
+                    <div className="flex-1 space-y-1.5 overflow-y-auto sm:max-h-[120px] custom-scrollbar">
                        {d.payments?.map((p: any, pIdx: number) => (
                          <div 
                            key={pIdx} 

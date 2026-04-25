@@ -146,10 +146,10 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
       
       <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden relative animate-in slide-in-from-bottom-8 duration-500">
         {/* Header */}
-        <div className="px-8 py-6 border-b border-border-color flex items-center justify-between bg-white sticky top-0 z-10">
+        <div className="px-5 lg:px-8 py-4 lg:py-6 border-b border-border-color flex items-center justify-between bg-white sticky top-0 z-10">
           <div>
-            <h2 className="text-xl font-bold text-text-main tracking-tight">{productId ? 'Ürünü Düzenle' : 'Yeni Ürün Kaydı'}</h2>
-            <p className="text-[10px] text-text-muted font-bold uppercase tracking-widest mt-1">Adım {step} / {totalSteps}: {getStepLabel(step)}</p>
+            <h2 className="text-lg lg:text-xl font-bold text-text-main tracking-tight">{productId ? 'Ürünü Düzenle' : 'Yeni Ürün Kaydı'}</h2>
+            <p className="text-[9px] lg:text-[10px] text-text-muted font-bold uppercase tracking-widest mt-1">Adım {step} / {totalSteps}: {getStepLabel(step)}</p>
           </div>
           <button 
             onClick={onClose}
@@ -168,7 +168,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8 bg-white">
+        <div className="flex-1 overflow-y-auto p-5 lg:p-8 bg-white">
           {step === 1 && (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -457,21 +457,30 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
         </div>
 
         {/* Footer */}
-        <div className="px-8 py-6 border-t border-border-color flex items-center justify-between bg-bg-main">
-          {step > 1 ? (
-            <button 
-              onClick={() => setStep(step - 1)}
-              className="flex items-center px-5 py-2.5 bg-white border border-border-color text-text-main rounded-xl font-bold text-sm hover:shadow-sm active:scale-95 transition-all"
-            >
-              <ChevronLeft className="w-4 h-4 mr-2" />
-              Geri
-            </button>
-          ) : <div></div>}
+        <div className="px-5 lg:px-8 py-4 lg:py-6 border-t border-border-color flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-bg-main gap-4 sm:gap-0">
+          <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto sm:space-x-4">
+            {step > 1 ? (
+              <button 
+                onClick={() => setStep(step - 1)}
+                className="flex items-center px-5 py-2.5 bg-white border border-border-color text-text-main rounded-xl font-bold text-sm hover:shadow-sm active:scale-95 transition-all"
+              >
+                <ChevronLeft className="w-4 h-4 mr-2" />
+                Geri
+              </button>
+            ) : <div className="sm:hidden"></div>}
 
-          <div className="flex items-center space-x-4">
+            <button 
+               onClick={onClose}
+               className="sm:hidden px-5 py-2.5 text-text-muted font-bold text-sm hover:text-text-main transition-colors"
+             >
+               Vazgeç
+             </button>
+          </div>
+
+          <div className="flex items-center space-x-4 w-full sm:w-auto">
              <button 
                onClick={onClose}
-               className="px-5 py-2.5 text-text-muted font-bold text-sm hover:text-text-main transition-colors"
+               className="hidden sm:block px-5 py-2.5 text-text-muted font-bold text-sm hover:text-text-main transition-colors"
              >
                Vazgeç
              </button>
@@ -479,7 +488,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                <button 
                  onClick={() => setStep(step + 1)}
                  disabled={step === 1 && (!formData.name || !formData.title)}
-                 className="btn-primary px-8 flex items-center h-11"
+                 className="flex-1 sm:flex-none btn-primary px-8 flex items-center justify-center h-11"
                >
                  <span>Devam Et</span>
                  <ChevronRight className="w-4 h-4 ml-2" />
@@ -488,7 +497,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                <button 
                  onClick={handleSubmit}
                  disabled={loading}
-                 className="flex items-center px-10 py-2.5 bg-success text-white rounded-xl font-bold text-sm shadow-xl shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all h-11"
+                 className="flex-1 sm:flex-none flex items-center justify-center px-10 py-2.5 bg-success text-white rounded-xl font-bold text-sm shadow-xl shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all h-11"
                >
                  {loading ? 'Kaydediliyor...' : 'Ürünü Kaydet'}
                  <CheckCircle2 className="w-4 h-4 ml-2" />

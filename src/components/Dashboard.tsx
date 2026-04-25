@@ -201,21 +201,21 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-bg-main text-[11px] uppercase tracking-wider text-text-muted font-bold">
-                  <th className="px-6 py-3">Tarih</th>
-                  <th className="px-6 py-3">Kategori</th>
-                  <th className="px-6 py-3">Tutar</th>
-                  <th className="px-6 py-3">Platform</th>
+                  <th className="px-4 lg:px-6 py-3">Tarih</th>
+                  <th className="px-4 lg:px-6 py-3">Kategori</th>
+                  <th className="px-4 lg:px-6 py-3">Tutar</th>
+                  <th className="px-4 lg:px-6 py-3 hidden sm:table-cell">Platform</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-color">
                 {recentTransactions.map((tx) => (
                   <tr key={tx.id} className="hover:bg-bg-main transition-colors text-sm">
-                    <td className="px-6 py-4 text-text-muted">{new Date(tx.date).toLocaleDateString('tr-TR')}</td>
-                    <td className="px-6 py-4 font-medium">{tx.category}</td>
-                    <td className={cn("px-6 py-4 font-bold", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
+                    <td className="px-4 lg:px-6 py-4 text-text-muted">{new Date(tx.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}</td>
+                    <td className="px-4 lg:px-6 py-4 font-medium">{tx.category}</td>
+                    <td className={cn("px-4 lg:px-6 py-4 font-bold", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
                       {tx.type === 'Income' ? '+' : '-'}{formatCurrency(tx.amount)}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 lg:px-6 py-4 hidden sm:table-cell">
                       <span className="px-2 py-0.5 rounded bg-bg-main border border-border-color text-text-main text-[10px] font-bold uppercase tracking-tight">
                         {tx.platform}
                       </span>

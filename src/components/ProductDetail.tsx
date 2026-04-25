@@ -92,25 +92,25 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
       {/* Top Bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
          <button 
            onClick={onBack}
-           className="flex items-center text-[#64748B] hover:text-[#0F172A] transition-colors p-2 -ml-2 rounded-lg hover:bg-[#F1F5F9]"
+           className="flex items-center text-[#64748B] hover:text-[#0F172A] transition-colors p-2 -ml-2 rounded-lg hover:bg-[#F1F5F9] w-fit"
          >
            <ArrowLeft className="w-5 h-5 mr-2" />
            <span className="font-bold text-sm">Listeye Dön</span>
          </button>
-         <div className="flex items-center space-x-3">
+         <div className="flex items-center space-x-3 w-full sm:w-auto">
              <button 
                onClick={onEdit}
-               className="flex items-center px-4 py-2 bg-[#0F172A] text-white rounded-xl font-bold text-sm hover:scale-105 transition-all shadow-md"
+               className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2.5 bg-[#0F172A] text-white rounded-xl font-bold text-sm hover:scale-105 transition-all shadow-md"
              >
                <Edit3 className="w-4 h-4 mr-2" />
                Düzenle
              </button>
              <button 
                onClick={deleteProduct}
-               className="p-2 border border-[#E2E8F0] text-rose-500 rounded-xl hover:bg-rose-50 transition-colors"
+               className="p-2.5 border border-[#E2E8F0] text-rose-500 rounded-xl hover:bg-rose-50 transition-colors"
              >
                <Trash2 className="w-4 h-4" />
              </button>
@@ -203,18 +203,18 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                   Stok Yönetimi
                 </h3>
              </div>
-             <div className="p-10 flex flex-col items-center justify-center space-y-6">
+             <div className="p-6 lg:p-10 flex flex-col items-center justify-center space-y-6">
                 <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Mevcut Toplam Stok</p>
-                <div className="flex items-center space-x-8">
+                <div className="flex items-center space-x-4 lg:space-x-8">
                    <button 
                      onClick={() => adjustStock('Depo', -1)}
-                     className="w-16 h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-red-50 hover:text-danger transition-all active:scale-90 shadow-md group"
+                     className="w-14 h-14 lg:w-16 lg:h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-red-50 hover:text-danger transition-all active:scale-90 shadow-md group"
                    >
-                     <Minus className="w-6 h-6 transition-transform group-hover:scale-110" />
+                     <Minus className="w-5 h-5 lg:w-6 lg:h-6 transition-transform group-hover:scale-110" />
                    </button>
                    <div className="flex flex-col items-center">
                      <span className={cn(
-                       "text-6xl font-black tracking-tighter", 
+                       "text-4xl lg:text-6xl font-black tracking-tighter", 
                        (product.total_stock || 0) < 10 ? "text-danger" : "text-text-main"
                      )}>
                        {product.total_stock}
@@ -223,9 +223,9 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
                    </div>
                    <button 
                      onClick={() => adjustStock('Depo', 1)}
-                     className="w-16 h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-green-50 hover:text-success transition-all active:scale-90 shadow-md group"
+                     className="w-14 h-14 lg:w-16 lg:h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-green-50 hover:text-success transition-all active:scale-90 shadow-md group"
                    >
-                     <Plus className="w-6 h-6 transition-transform group-hover:scale-110" />
+                     <Plus className="w-5 h-5 lg:w-6 lg:h-6 transition-transform group-hover:scale-110" />
                    </button>
                 </div>
                 <div className="flex items-center space-x-2 text-[10px] font-bold text-text-muted bg-bg-main px-4 py-2 rounded-full border border-border-color uppercase tracking-widest">

@@ -90,15 +90,15 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-text-main tracking-tight">Sistem Ayarları</h2>
-          <p className="text-sm text-text-muted">Panel yapılandırmasını buradan özelleştirin.</p>
+          <h2 className="text-xl lg:text-2xl font-bold text-text-main tracking-tight">Sistem Ayarları</h2>
+          <p className="text-xs lg:text-sm text-text-muted">Panel yapılandırmasını buradan özelleştirin.</p>
         </div>
         <button 
           onClick={handleSave}
           disabled={loading}
-          className="btn-primary h-11 px-8 flex items-center justify-center"
+          className="btn-primary h-11 px-8 flex items-center justify-center w-full sm:w-auto"
         >
           <span>{loading ? 'Kaydediliyor...' : saved ? 'Ayarlar Kaydedildi' : 'Değişiklikleri Kaydet'}</span>
           {saved ? <CheckCircle2 className="w-4 h-4 ml-2" /> : <Save className="w-4 h-4 ml-2" />}
@@ -107,7 +107,7 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
 
       <div className="card overflow-hidden divide-y divide-border-color">
          {/* General Info */}
-         <div className="p-8 space-y-6">
+         <div className="p-6 lg:p-8 space-y-6">
             <h3 className="text-xs font-bold text-text-muted uppercase tracking-widest flex items-center">
                <Building2 className="w-4 h-4 mr-3 text-primary" />
                Genel Panel Bilgileri
