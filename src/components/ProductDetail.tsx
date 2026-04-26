@@ -230,45 +230,6 @@ export default function ProductDetail({ productId, onBack, onEdit }: ProductDeta
            </section>
 
            <section className="card">
-             <div className="p-6 border-b border-border-color flex items-center justify-between">
-                <h3 className="font-bold text-text-main text-sm flex items-center">
-                  <Package className="w-4 h-4 mr-2 text-primary" />
-                  Stok Yönetimi
-                </h3>
-             </div>
-             <div className="p-6 lg:p-10 flex flex-col items-center justify-center space-y-6">
-                <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Mevcut Toplam Stok</p>
-                <div className="flex items-center space-x-4 lg:space-x-8">
-                   <button 
-                     onClick={() => adjustStock('Depo', -1)}
-                     className="w-14 h-14 lg:w-16 lg:h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-red-50 hover:text-danger transition-all active:scale-90 shadow-md group"
-                   >
-                     <Minus className="w-5 h-5 lg:w-6 lg:h-6 transition-transform group-hover:scale-110" />
-                   </button>
-                   <div className="flex flex-col items-center">
-                     <span className={cn(
-                       "text-4xl lg:text-6xl font-black tracking-tighter", 
-                       (product.total_stock || 0) < 10 ? "text-danger" : "text-text-main"
-                     )}>
-                       {product.total_stock}
-                     </span>
-                     <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-2">ADET</span>
-                   </div>
-                   <button 
-                     onClick={() => adjustStock('Depo', 1)}
-                     className="w-14 h-14 lg:w-16 lg:h-16 rounded-2xl bg-bg-main border border-border-color flex items-center justify-center hover:bg-green-50 hover:text-success transition-all active:scale-90 shadow-md group"
-                   >
-                     <Plus className="w-5 h-5 lg:w-6 lg:h-6 transition-transform group-hover:scale-110" />
-                   </button>
-                </div>
-                <div className="flex items-center space-x-2 text-[10px] font-bold text-text-muted bg-bg-main px-4 py-2 rounded-full border border-border-color uppercase tracking-widest">
-                   <div className={cn("w-2 h-2 rounded-full", product.total_stock > 0 ? "bg-success" : "bg-danger animate-pulse")}></div>
-                   {product.total_stock > 0 ? "Stokta Var" : "Stok Tükendi"}
-                </div>
-             </div>
-           </section>
-
-           <section className="card">
               <div className="p-6 border-b border-border-color flex items-center space-x-2">
                 <History className="w-4 h-4 text-text-muted" />
                 <h3 className="font-bold text-text-main text-sm">Stok Hareket Geçmişi</h3>

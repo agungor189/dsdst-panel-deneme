@@ -7,6 +7,8 @@ import Database from "better-sqlite3";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,6 +141,81 @@ db.exec(`
     status TEXT DEFAULT 'Active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS firms (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    sector TEXT,
+    city TEXT,
+    website TEXT,
+    phone TEXT,
+    email TEXT,
+    contact_person TEXT,
+    source_url TEXT,
+    related_product TEXT,
+    status TEXT DEFAULT 'Yeni',
+    notes TEXT,
+    is_active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS firm_notes (
+    id TEXT PRIMARY KEY,
+    firm_id TEXT,
+    note TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS offers (
+    id TEXT PRIMARY KEY,
+    firm_id TEXT,
+    title TEXT,
+    description TEXT,
+    amount REAL DEFAULT 0,
+    currency TEXT DEFAULT '₺',
+    status TEXT DEFAULT 'Taslak',
+    offer_date DATETIME,
+    valid_until DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS follow_ups (
+    id TEXT PRIMARY KEY,
+    firm_id TEXT,
+    type TEXT,
+    note TEXT,
+    next_follow_up_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(firm_id) REFERENCES firms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS sales (
+    id TEXT PRIMARY KEY,
+    customer_name TEXT,
+    customer_phone TEXT,
+    customer_address TEXT,
+    shipping_company TEXT,
+    tracking_number TEXT,
+    total_weight REAL,
+    total_quantity INTEGER,
+    total_amount REAL,
+    status TEXT DEFAULT 'Hazırlanıyor',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS sale_items (
+    id TEXT PRIMARY KEY,
+    sale_id TEXT,
+    product_id TEXT,
+    product_name TEXT,
+    quantity INTEGER,
+    weight REAL,
+    FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
+  );
 `);
 
 try {
@@ -193,9 +270,27 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Security Headers (Helmet)
+  // Disabled Content Security Policy for Vite/React development compatibility.
+  // In a strict production environment, you should configure CSP properly.
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+  }));
+
+  // General Rate Limiting
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // Limit each IP to 1000 requests per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: "Çok fazla istek gönderildi, lütfen daha sonra tekrar deneyin."
+  });
+  app.use(limiter);
+
   app.use(cors());
-  app.use(express.json());
-  app.use("/uploads", express.static(uploadsDir));
+  app.use(express.json({ limit: '10mb' })); // Limit JSON body size
+  app.use("/uploads", express.static(uploadsDir, { maxAge: '1d' }));
 
   // --- API ROUTES ---
 
@@ -622,6 +717,199 @@ async function startServer() {
     })();
     
     res.json({ success: true });
+  });
+
+  // B2B: Firms
+  app.get("/api/b2b/firms", (req, res) => {
+    try {
+      const firms = db.prepare(`SELECT * FROM firms ORDER BY created_at DESC`).all();
+      res.json(firms);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/b2b/firms/:id", (req, res) => {
+    try {
+      const firm = db.prepare("SELECT * FROM firms WHERE id = ?").get(req.params.id) as any;
+      if (!firm) return res.status(404).json({ error: "Firm not found" });
+
+      const note_list = db.prepare("SELECT * FROM firm_notes WHERE firm_id = ? ORDER BY created_at DESC").all(req.params.id);
+      const offers = db.prepare("SELECT * FROM offers WHERE firm_id = ? ORDER BY created_at DESC").all(req.params.id);
+      const follow_ups = db.prepare("SELECT * FROM follow_ups WHERE firm_id = ? ORDER BY created_at DESC").all(req.params.id);
+      
+      res.json({ ...firm, note_list, offers, follow_ups });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/b2b/firms", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { name, sector, city, website, phone, email, contact_person, source_url, related_product, status, notes } = req.body;
+      
+      db.prepare(`
+        INSERT INTO firms (id, name, sector, city, website, phone, email, contact_person, source_url, related_product, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, name, sector, city, website, phone, email, contact_person, source_url, related_product, status || 'Yeni', notes);
+      
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/b2b/firms/:id", (req, res) => {
+    try {
+      const { name, sector, city, website, phone, email, contact_person, source_url, related_product, status, notes, is_active } = req.body;
+      db.prepare(`
+        UPDATE firms SET 
+          name=?, sector=?, city=?, website=?, phone=?, email=?, contact_person=?, source_url=?, related_product=?, status=?, notes=?, is_active=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).run(name, sector, city, website, phone, email, contact_person, source_url, related_product, status, notes, is_active === undefined ? 1 : is_active ? 1 : 0, req.params.id);
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/b2b/firms/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM firms WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // B2B: Notes
+  app.post("/api/b2b/firms/:id/notes", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { note } = req.body;
+      db.prepare("INSERT INTO firm_notes (id, firm_id, note) VALUES (?, ?, ?)").run(id, req.params.id, note);
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // B2B: Offers
+  app.get("/api/b2b/offers", (req, res) => {
+    try {
+      const offers = db.prepare(`
+        SELECT o.*, f.name as firm_name 
+        FROM offers o 
+        LEFT JOIN firms f ON o.firm_id = f.id 
+        ORDER BY o.created_at DESC
+      `).all();
+      res.json(offers);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/b2b/offers", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { firm_id, title, description, amount, currency, status, offer_date, valid_until } = req.body;
+      db.prepare(`
+        INSERT INTO offers (id, firm_id, title, description, amount, currency, status, offer_date, valid_until)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, firm_id, title, description, amount, currency || '₺', status || 'Taslak', offer_date, valid_until);
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/b2b/offers/:id/status", (req, res) => {
+    try {
+      db.prepare("UPDATE offers SET status = ? WHERE id = ?").run(req.body.status, req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/b2b/offers/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM offers WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // B2B: Follow-ups
+  app.get("/api/b2b/follow-ups", (req, res) => {
+    try {
+      const follow_ups = db.prepare(`
+        SELECT fu.*, f.name as firm_name 
+        FROM follow_ups fu 
+        LEFT JOIN firms f ON fu.firm_id = f.id 
+        ORDER BY fu.next_follow_up_date ASC, fu.created_at DESC
+      `).all();
+      res.json(follow_ups);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/b2b/follow-ups", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { firm_id, type, note, next_follow_up_date } = req.body;
+      db.prepare(`
+        INSERT INTO follow_ups (id, firm_id, type, note, next_follow_up_date)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, firm_id, type, note, next_follow_up_date);
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- SALES ---
+  app.get("/api/sales", (req, res) => {
+    try {
+      const sales = db.prepare("SELECT * FROM sales ORDER BY created_at DESC").all();
+      sales.forEach((s: any) => {
+        s.items = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(s.id);
+      });
+      res.json(sales);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/sales", (req, res) => {
+    try {
+      const id = uuidv4();
+      const { customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount, items } = req.body;
+      
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO sales (id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, customer_name, customer_phone, customer_address, shipping_company, tracking_number, total_weight, total_quantity, total_amount);
+
+        const insertItem = db.prepare(`
+          INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, weight)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const item of items) {
+          insertItem.run(uuidv4(), id, item.product_id, item.product_name, item.quantity, item.weight);
+        }
+      })();
+
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // --- VITE MIDDLEWARE ---

@@ -14,7 +14,9 @@ import {
   Menu,
   X,
   LogOut,
-  Activity
+  Activity,
+  Briefcase,
+  ShoppingCart
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
@@ -31,6 +33,11 @@ import { Settings } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import B2BFirms from './components/b2b/B2BFirms';
+import B2BFirmDetail from './components/b2b/B2BFirmDetail';
+import B2BFirmForm from './components/b2b/B2BFirmForm';
+import Sales from './components/sales/Sales';
+
 export const AuthContext = createContext<{ role: 'admin' | 'user', isReadOnly: boolean }>({ role: 'admin', isReadOnly: false });
 export const useAuth = () => useContext(AuthContext);
 
@@ -38,7 +45,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs';
+type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -58,6 +65,8 @@ export default function App() {
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [selectedFirmId, setSelectedFirmId] = useState<string | null>(null);
+  const [showFirmAdd, setShowFirmAdd] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
@@ -136,6 +145,8 @@ export default function App() {
   const navItems = [
     { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
     { id: 'products', label: 'Ürünler', icon: Package },
+    { id: 'sales', label: 'Satışlar', icon: ShoppingCart },
+    { id: 'b2b', label: 'B2B', icon: Briefcase },
     { id: 'income', label: 'Gelirler', icon: TrendingUp },
     { id: 'expense', label: 'Giderler', icon: TrendingDown },
     { id: 'recurring', label: 'Periyodikler', icon: Repeat },
@@ -180,6 +191,9 @@ export default function App() {
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id as View);
+                if (item.id === 'b2b') {
+                  setSelectedFirmId(null);
+                }
                 setIsMobileMenuOpen(false);
               }}
               className={cn(
@@ -349,6 +363,22 @@ export default function App() {
               }} 
             />
           )}
+          {currentView === 'b2b' && !selectedFirmId && (
+            <B2BFirms 
+              onFirmClick={(id: string) => setSelectedFirmId(id)} 
+              onAddFirm={() => setShowFirmAdd(true)} 
+            />
+          )}
+          {currentView === 'b2b' && selectedFirmId && (
+            <B2BFirmDetail firmId={selectedFirmId} onBack={() => setSelectedFirmId(null)} />
+          )}
+          {showFirmAdd && (
+            <B2BFirmForm onClose={() => setShowFirmAdd(false)} onSave={() => {
+              setCurrentView('b2b');
+              setSelectedFirmId(null);
+            }} />
+          )}
+          {currentView === 'sales' && <Sales />}
           {currentView === 'income' && <Transactions initialType="Income" settings={settings} />}
           {currentView === 'expense' && <Transactions initialType="Expense" settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}

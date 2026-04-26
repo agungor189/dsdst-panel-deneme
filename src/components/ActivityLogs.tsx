@@ -35,35 +35,46 @@ const LogDetails = ({ detailsStr }: { detailsStr: string }) => {
           const oldP = details.before[key];
           const newP = details.after[key];
           
-          const isStockSameOld = oldP.every(p => p.stock === oldP[0]?.stock);
-          const isStockSameNew = newP.every(p => p.stock === newP[0]?.stock);
-          if (isStockSameOld && isStockSameNew && oldP[0]?.stock !== newP[0]?.stock) {
-             diffs.push({ key: 'Tüm Platformlar Stok', old: oldP[0]?.stock, new: newP[0]?.stock });
+          const stockChangedAny = newP.some((nP: any) => {
+             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+             return !oP || oP.stock !== nP.stock;
+          });
+          
+          if (stockChangedAny && newP.length > 0) {
+             const oldStock = oldP.length > 0 ? oldP[0].stock : 0;
+             diffs.push({ key: 'Stok', old: oldStock, new: newP[0].stock });
           }
           
-          const isPriceSameOld = oldP.every(p => p.price === oldP[0]?.price);
-          const isPriceSameNew = newP.every(p => p.price === newP[0]?.price);
-          if (isPriceSameOld && isPriceSameNew && oldP[0]?.price !== newP[0]?.price) {
-             diffs.push({ key: 'Tüm Platformlar Fiyat', old: oldP[0]?.price, new: newP[0]?.price });
+          const isPriceSameOld = oldP.length > 0 && oldP.every((p: any) => p.price === oldP[0]?.price);
+          const isPriceSameNew = newP.length > 0 && newP.every((p: any) => p.price === newP[0]?.price);
+          const priceChangedAny = newP.some((nP: any) => {
+             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+             return !oP || oP.price !== nP.price;
+          });
+          
+          if (isPriceSameNew && priceChangedAny) {
+             diffs.push({ key: 'Tüm Platformlar Fiyat', old: isPriceSameOld ? oldP[0]?.price : '(Farklı Değerler)', new: newP[0]?.price });
           }
           
-          const isListedSameOld = oldP.every(p => p.is_listed === oldP[0]?.is_listed);
-          const isListedSameNew = newP.every(p => p.is_listed === newP[0]?.is_listed);
-          if (isListedSameOld && isListedSameNew && oldP[0]?.is_listed !== newP[0]?.is_listed) {
-             diffs.push({ key: 'Tüm Platform Durumu', old: oldP[0]?.is_listed, new: newP[0]?.is_listed });
+          const isListedSameOld = oldP.length > 0 && oldP.every((p: any) => p.is_listed === oldP[0]?.is_listed);
+          const isListedSameNew = newP.length > 0 && newP.every((p: any) => p.is_listed === newP[0]?.is_listed);
+          const listedChangedAny = newP.some((nP: any) => {
+             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+             return !oP || oP.is_listed !== nP.is_listed;
+          });
+          
+          if (isListedSameNew && listedChangedAny) {
+             diffs.push({ key: 'Tüm Platformlar Durumu', old: isListedSameOld ? (oldP[0]?.is_listed ? 'Yayında' : 'Yayında Değil') : '(Farklı Değerler)', new: newP[0]?.is_listed ? 'Yayında' : 'Yayında Değil' });
           }
           
-          newP.forEach(nP => {
-            const oP = oldP.find(p => p.platform_name === nP.platform_name);
+          newP.forEach((nP: any) => {
+            const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
             if (oP) {
-              if (!(isStockSameOld && isStockSameNew) && oP.stock !== nP.stock) {
-                diffs.push({ key: `${nP.platform_name} Stok`, old: oP.stock, new: nP.stock });
-              }
-              if (!(isPriceSameOld && isPriceSameNew) && oP.price !== nP.price) {
+              if (!(isPriceSameNew && priceChangedAny) && oP.price !== nP.price) {
                 diffs.push({ key: `${nP.platform_name} Fiyat`, old: oP.price, new: nP.price });
               }
-              if (!(isListedSameOld && isListedSameNew) && oP.is_listed !== nP.is_listed) {
-                diffs.push({ key: `${nP.platform_name} Durum`, old: oP.is_listed, new: nP.is_listed });
+              if (!(isListedSameNew && listedChangedAny) && oP.is_listed !== nP.is_listed) {
+                diffs.push({ key: `${nP.platform_name} Durum`, old: oP.is_listed ? 'Yayında' : 'Yayında Değil', new: nP.is_listed ? 'Yayında' : 'Yayında Değil' });
               }
             }
           });
