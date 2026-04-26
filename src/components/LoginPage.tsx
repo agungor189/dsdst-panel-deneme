@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { Lock, User, LogIn, ShieldCheck, Zap, BarChart3, Globe } from 'lucide-react';
+import { Lock, User, LogIn, Zap } from 'lucide-react';
 
 export default function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('');
@@ -44,11 +43,8 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
         </div>
 
         {/* Login Form */}
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.8 }}
-          className="flex justify-center"
+        <div 
+          className="flex justify-center transition-all duration-700 opacity-100 scale-100"
         >
           <div className="w-full bg-white rounded-[30px] lg:rounded-[40px] shadow-2xl shadow-blue-900/5 p-8 lg:p-12 border border-border-color relative">
             <div className="text-center mb-8 lg:mb-10">
@@ -95,14 +91,12 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
               </div>
 
               {error && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-red-50 text-red-600 text-xs font-bold p-4 rounded-xl flex items-center"
+                <div 
+                  className="bg-red-50 text-red-600 text-xs font-bold p-4 rounded-xl flex items-center transition-all"
                 >
                   <Lock className="w-4 h-4 mr-2" />
                   {error}
-                </motion.div>
+                </div>
               )}
 
               <button 
@@ -121,7 +115,7 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
             </form>
 
           </div>
-        </motion.div>
+        </div>
       </div>
       
       {/* Footer Info */}
