@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, User, LogIn, Zap } from 'lucide-react';
 
-export default function LoginPage({ onLogin }: { onLogin: () => void }) {
+export default function LoginPage({ onLogin }: { onLogin: (role: 'admin' | 'user') => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -16,10 +16,19 @@ export default function LoginPage({ onLogin }: { onLogin: () => void }) {
       if (username === 'admin' && password === 'admin') {
         try {
           localStorage.setItem('isAuthenticated', 'true');
+          localStorage.setItem('userRole', 'admin');
         } catch {
           // ignore
         }
-        onLogin();
+        onLogin('admin');
+      } else if (username === 'user' && password === 'user') {
+        try {
+          localStorage.setItem('isAuthenticated', 'true');
+          localStorage.setItem('userRole', 'user');
+        } catch {
+          // ignore
+        }
+        onLogin('user');
       } else {
         setError('Geçersiz kullanıcı adı veya şifre.');
         setLoading(false);

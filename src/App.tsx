@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, createContext, useContext } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -13,7 +13,8 @@ import {
   ChevronRight,
   Menu,
   X,
-  LogOut
+  LogOut,
+  Activity
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
@@ -23,18 +24,38 @@ import Transactions from './components/Transactions';
 import Analytics from './components/Analytics';
 import RecurringPayments from './components/RecurringPayments';
 import SettingsView from './components/SettingsView';
+import ActivityLogs from './components/ActivityLogs';
+import LoginPage from './components/LoginPage';
 import { api } from './lib/api';
 import { Settings } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+export const AuthContext = createContext<{ role: 'admin' | 'user', isReadOnly: boolean }>({ role: 'admin', isReadOnly: false });
+export const useAuth = () => useContext(AuthContext);
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings';
+type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs';
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('isAuthenticated') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [userRole, setUserRole] = useState<'admin' | 'user'>(() => {
+    try {
+      return (localStorage.getItem('userRole') as 'admin' | 'user') || 'admin';
+    } catch {
+      return 'admin';
+    }
+  });
+
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -80,6 +101,22 @@ export default function App() {
     }
   };
 
+  const handleLogin = (role: 'admin' | 'user') => {
+    setIsAuthenticated(true);
+    setUserRole(role);
+    loadSettings();
+  };
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('userRole');
+    } catch {
+      // ignore
+    }
+    setIsAuthenticated(false);
+  };
+
   const navigateToProduct = (id: string) => {
     setSelectedProductId(id);
     setCurrentView('product-detail');
@@ -92,14 +129,18 @@ export default function App() {
     { id: 'expense', label: 'Giderler', icon: TrendingDown },
     { id: 'recurring', label: 'Periyodikler', icon: Repeat },
     { id: 'analytics', label: 'Analizler', icon: BarChart3 },
-    { id: 'settings', label: 'Ayarlar', icon: SettingsIcon },
   ];
 
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   return (
-    <div className="min-h-screen bg-bg-main text-text-main font-sans selection:bg-primary/10">
+    <AuthContext.Provider value={{ role: userRole, isReadOnly: userRole !== 'admin' }}>
+      <div className="min-h-screen bg-bg-main text-text-main font-sans selection:bg-primary/10" data-role={userRole}>
       {/* Sidebar */}
       <aside className={cn(
-        "fixed left-0 top-0 h-full border-r border-border-color bg-sidebar-bg text-white transition-all duration-300 z-50",
+        "fixed left-0 top-0 h-full border-r border-border-color bg-sidebar-bg text-white transition-all duration-300 z-50 flex flex-col",
         isSidebarOpen ? "w-64" : "w-20",
         "md:translate-x-0",
         isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full md:translate-x-0"
@@ -122,7 +163,7 @@ export default function App() {
           )}
         </div>
 
-        <nav className="mt-4 px-0 space-y-0.5 overflow-y-auto max-h-[calc(100vh-160px)]">
+        <nav className="mt-4 px-0 space-y-0.5 overflow-y-auto flex-1">
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -142,6 +183,61 @@ export default function App() {
             </button>
           ))}
         </nav>
+
+        <div className="mt-auto border-t border-white/10 pb-4 pt-2 shrink-0">
+            <button
+              onClick={() => {
+                setCurrentView('activity-logs');
+                setIsMobileMenuOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center px-6 py-3.5 transition-all text-sm font-medium group relative",
+                currentView === 'activity-logs'
+                  ? "bg-primary/10 text-white border-l-4 border-primary" 
+                  : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <Activity className={cn("w-5 h-5", (isSidebarOpen || isMobileMenuOpen) ? "mr-3" : "mx-auto")} />
+              {(isSidebarOpen || isMobileMenuOpen) && <span>Aktivite Logları</span>}
+            </button>
+            <button
+              onClick={() => {
+                setCurrentView('settings');
+                setIsMobileMenuOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center px-6 py-3.5 transition-all text-sm font-medium group relative",
+                currentView === 'settings'
+                  ? "bg-primary/10 text-white border-l-4 border-primary" 
+                  : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <SettingsIcon className={cn("w-5 h-5", (isSidebarOpen || isMobileMenuOpen) ? "mr-3" : "mx-auto")} />
+              {(isSidebarOpen || isMobileMenuOpen) && <span>Ayarlar</span>}
+            </button>
+
+            {(isSidebarOpen || isMobileMenuOpen) ? (
+              <div className="px-4 mt-2 pt-2 border-t border-white/10 text-center">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all text-sm font-bold logout-override-ignore"
+                >
+                    <LogOut className="w-5 h-5" />
+                    <span>Çıkış Yap</span>
+                </button>
+              </div>
+            ) : (
+              <div className="mt-2 pt-2 border-t border-white/10 flex justify-center">
+                 <button 
+                  onClick={handleLogout}
+                  className="p-2.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all logout-override-ignore"
+                  title="Çıkış Yap"
+                >
+                    <LogOut className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+        </div>
 
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -179,7 +275,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2 md:space-x-6">
-             <div className="relative hidden md:block">
+             <div className="relative hidden md:block search-bar-container">
                <input 
                  type="text" 
                  placeholder="Ürün Ara..." 
@@ -191,11 +287,30 @@ export default function App() {
                <Bell className="w-5 h-5" />
              </button>
              <div className="flex items-center space-x-2 md:space-x-3 border-l border-border-color pl-2 md:pl-6">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold shrink-0">AL</div>
-              <span className="text-sm font-semibold text-text-main hidden sm:inline">Yönetici</span>
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                {userRole === 'admin' ? 'AD' : 'US'}
+              </div>
+              <span className="text-sm font-semibold text-text-main hidden sm:inline capitalize">{userRole}</span>
             </div>
           </div>
         </header>
+
+        {/* User Role Styles constraints */}
+        {userRole === 'user' && (
+          <style>{`
+             button.btn-primary { display: none !important; }
+             button.bg-primary:not(.rounded-full) { display: none !important; }
+             button.text-red-500:not(.logout-override-ignore), button.text-red-600, button.text-danger { display: none !important; }
+             button.border-red-200 { display: none !important; }
+             button:has(.lucide-plus) { display: none !important; }
+             input:not(.search-bar-container input), select, textarea { 
+                pointer-events: none !important; 
+                opacity: 0.6 !important; 
+                background: #f1f5f9 !important; 
+             }
+             button:has(.fa-trash), button:has(svg.lucide-trash), button:has(svg.lucide-trash-2) { display: none !important; }
+          `}</style>
+        )}
 
         {/* View Container */}
         <div className="p-4 md:p-6 flex-1 max-w-[1600px] w-full mx-auto">
@@ -227,9 +342,11 @@ export default function App() {
           {currentView === 'expense' && <Transactions initialType="Expense" settings={settings} />}
           {currentView === 'recurring' && <RecurringPayments settings={settings} />}
           {currentView === 'analytics' && <Analytics settings={settings} />}
+          {currentView === 'activity-logs' && <ActivityLogs />}
           {currentView === 'settings' && <SettingsView onUpdate={loadSettings} />}
         </div>
       </main>
     </div>
+    </AuthContext.Provider>
   );
 }

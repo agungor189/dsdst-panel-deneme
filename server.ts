@@ -120,6 +120,15 @@ db.exec(`
     value TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS activity_logs (
+    id TEXT PRIMARY KEY,
+    action TEXT,
+    entity_type TEXT,
+    entity_id TEXT,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS recurring_payments (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -169,6 +178,17 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+function logActivity(action: string, entity_type: string, entity_id: string, details?: any) {
+  try {
+    db.prepare(`
+      INSERT INTO activity_logs (id, action, entity_type, entity_id, details)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(uuidv4(), action, entity_type, entity_id, details ? JSON.stringify(details) : null);
+  } catch (err) {
+    console.error("Activity logging failed", err);
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -178,6 +198,16 @@ async function startServer() {
   app.use("/uploads", express.static(uploadsDir));
 
   // --- API ROUTES ---
+
+  // Activity Logs
+  app.get("/api/activity-logs", (req, res) => {
+    try {
+      const logs = db.prepare("SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100").all();
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // Dashboard Metrics
   app.get("/api/dashboard/metrics", (req, res) => {
@@ -339,6 +369,7 @@ async function startServer() {
           insertImg.run(uuidv4(), id, img.path || img, idx);
         });
       }
+      logActivity('CREATE', 'product', id, { name, title, sku });
     })();
 
     res.json({ id });
@@ -386,6 +417,7 @@ async function startServer() {
           }
         });
       }
+      logActivity('UPDATE', 'product', req.params.id, { name, title, status });
     })();
 
     res.json({ success: true });
@@ -395,11 +427,13 @@ async function startServer() {
     console.log("Bulk deleting all products...");
     const result = db.prepare("DELETE FROM products").run();
     console.log(`Deleted ${result.changes} products.`);
+    logActivity('DELETE_ALL', 'product', 'all', { count: result.changes });
     res.json({ success: true, deletedCount: result.changes });
   });
 
   app.delete("/api/products/:id", (req, res) => {
     db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
+    logActivity('DELETE', 'product', req.params.id);
     res.json({ success: true });
   });
 
@@ -441,6 +475,8 @@ async function startServer() {
       
       db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
         .run(uuidv4(), product_id, platform_name, change_amount, reason);
+      
+      logActivity('UPDATE_STOCK', 'product', product_id, { platform_name, change_amount, reason });
     })();
 
     res.json({ success: true });
@@ -464,15 +500,18 @@ async function startServer() {
 
   app.post("/api/transactions", (req, res) => {
     const { date, type, category, platform, amount, product_id, note, reference_number } = req.body;
+    const txId = uuidv4();
     db.prepare(`
       INSERT INTO transactions (id, date, type, category, platform, amount, product_id, note, reference_number)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number);
+    `).run(txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number);
+    logActivity('CREATE', 'transaction', txId, { type, amount, category });
     res.json({ success: true });
   });
 
   app.delete("/api/transactions/:id", (req, res) => {
     db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
+    logActivity('DELETE', 'transaction', req.params.id);
     res.json({ success: true });
   });
 
@@ -484,15 +523,18 @@ async function startServer() {
 
   app.post("/api/recurring-payments", (req, res) => {
     const { title, day_of_month, amount, category, note } = req.body;
+    const recId = uuidv4();
     db.prepare(`
       INSERT INTO recurring_payments (id, title, day_of_month, amount, category, note)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), title, day_of_month, amount, category, note);
+    `).run(recId, title, day_of_month, amount, category, note);
+    logActivity('CREATE', 'recurring_payment', recId, { title, amount });
     res.json({ success: true });
   });
 
   app.delete("/api/recurring-payments/:id", (req, res) => {
     db.prepare("DELETE FROM recurring_payments WHERE id = ?").run(req.params.id);
+    logActivity('DELETE', 'recurring_payment', req.params.id);
     res.json({ success: true });
   });
 
@@ -549,6 +591,7 @@ async function startServer() {
       for (const [key, value] of Object.entries(body)) {
         stmt.run(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
       }
+      logActivity('UPDATE', 'settings', 'global', Object.keys(body));
     })();
     
     res.json({ success: true });
