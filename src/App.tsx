@@ -107,7 +107,13 @@ export default function App() {
     loadSettings();
   };
 
-  const handleLogout = () => {
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const handleConfirmLogout = () => {
     try {
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('userRole');
@@ -115,6 +121,11 @@ export default function App() {
       // ignore
     }
     setIsAuthenticated(false);
+    setShowLogoutConfirm(false);
+  };
+
+  const handleCancelLogout = () => {
+    setShowLogoutConfirm(false);
   };
 
   const navigateToProduct = (id: string) => {
@@ -219,7 +230,7 @@ export default function App() {
             {(isSidebarOpen || isMobileMenuOpen) ? (
               <div className="px-4 mt-2 pt-2 border-t border-white/10 text-center">
                 <button 
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all text-sm font-bold logout-override-ignore"
                 >
                     <LogOut className="w-5 h-5" />
@@ -229,7 +240,7 @@ export default function App() {
             ) : (
               <div className="mt-2 pt-2 border-t border-white/10 flex justify-center">
                  <button 
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className="p-2.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all logout-override-ignore"
                   title="Çıkış Yap"
                 >
@@ -345,6 +356,35 @@ export default function App() {
           {currentView === 'activity-logs' && <ActivityLogs />}
           {currentView === 'settings' && <SettingsView onUpdate={loadSettings} />}
         </div>
+        {showLogoutConfirm && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={handleCancelLogout}>
+            <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <LogOut className="w-8 h-8 text-red-500" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Çıkış Yap</h3>
+                <p className="text-gray-500 text-sm mb-6">
+                  Hesabınızdan çıkış yapmak istediğinize emin misiniz?
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={handleConfirmLogout}
+                    className="w-full py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-colors"
+                  >
+                    Evet, Çıkış Yap
+                  </button>
+                  <button
+                    onClick={handleCancelLogout}
+                    className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold transition-colors"
+                  >
+                    İptal
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
     </AuthContext.Provider>

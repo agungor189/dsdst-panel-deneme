@@ -60,6 +60,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
 
   const [images, setImages] = useState<any[]>([]);
   const [newImages, setNewImages] = useState<File[]>([]);
+  const [imageChanged, setImageChanged] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -108,17 +109,20 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     if (e.target.files) {
       const files = Array.from(e.target.files) as File[];
       setNewImages(prev => [...prev, ...files]);
+      setImageChanged(true);
     }
   };
 
   const removeNewImage = (index: number) => {
     setNewImages(prev => prev.filter((_, i) => i !== index));
+    setImageChanged(true);
   };
 
   const deleteExistingImage = async (id: string) => {
     try {
       await api.delete(`/images/${id}`);
       setImages(prev => prev.filter(img => img.id !== id));
+      setImageChanged(true);
     } catch (err) {
        alert("Görsel silinemedi");
     }
@@ -132,7 +136,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
     setLoading(true);
     try {
       let savedId = productId;
-      const payload = { ...formData, images };
+      const payload = { ...formData, images, imageChanged };
       
       if (productId) {
         await api.put(`/products/${productId}`, payload);
@@ -275,7 +279,7 @@ export default function ProductWizard({ productId, settings, onClose }: ProductW
                        type="button"
                        onClick={() => setFormData((prev: any) => ({ ...prev, category: c }))}
                        className={cn(
-                         "px-4 py-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all",
+                         "whitespace-nowrap px-4 py-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all",
                          formData.category === c ? "bg-primary border-primary text-white shadow-lg" : "bg-white border-border-color text-text-muted hover:bg-bg-main"
                        )}
                      >

@@ -1,6 +1,210 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-import { Activity, Clock } from 'lucide-react';
+import { Activity, Clock, FileText, X, ArrowRight } from 'lucide-react';
+
+const LogDetails = ({ detailsStr }: { detailsStr: string }) => {
+  const [expanded, setExpanded] = useState(false);
+  
+  if (!detailsStr) return <span>-</span>;
+  
+  let details;
+  try {
+    details = JSON.parse(detailsStr);
+  } catch(e) {
+    return <span>{detailsStr}</span>;
+  }
+  
+  if (!details || typeof details !== 'object') {
+     return <span>{String(details)}</span>;
+  }
+
+  // Calculate deep diff if before and after exist
+  let diffs: any[] = [];
+  if (details.before && details.after) {
+    if (details.after.imageChanged) {
+      diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
+    }
+    const allKeys = new Set([...Object.keys(details.before), ...Object.keys(details.after)]);
+    for (const key of allKeys) {
+      // Ignore updated_at auto updates if they are the only thing causing noise, but safe to show.
+      // We do a simple stringify comparison to support nested objects optionally
+      const bStr = JSON.stringify(details.before[key]);
+      const aStr = JSON.stringify(details.after[key]);
+      if (bStr !== aStr && key !== 'updated_at' && key !== 'imageChanged') {
+        if (key === 'platforms' && Array.isArray(details.before[key]) && Array.isArray(details.after[key])) {
+          const oldP = details.before[key];
+          const newP = details.after[key];
+          
+          const isStockSameOld = oldP.every(p => p.stock === oldP[0]?.stock);
+          const isStockSameNew = newP.every(p => p.stock === newP[0]?.stock);
+          if (isStockSameOld && isStockSameNew && oldP[0]?.stock !== newP[0]?.stock) {
+             diffs.push({ key: 'Tüm Platformlar Stok', old: oldP[0]?.stock, new: newP[0]?.stock });
+          }
+          
+          const isPriceSameOld = oldP.every(p => p.price === oldP[0]?.price);
+          const isPriceSameNew = newP.every(p => p.price === newP[0]?.price);
+          if (isPriceSameOld && isPriceSameNew && oldP[0]?.price !== newP[0]?.price) {
+             diffs.push({ key: 'Tüm Platformlar Fiyat', old: oldP[0]?.price, new: newP[0]?.price });
+          }
+          
+          const isListedSameOld = oldP.every(p => p.is_listed === oldP[0]?.is_listed);
+          const isListedSameNew = newP.every(p => p.is_listed === newP[0]?.is_listed);
+          if (isListedSameOld && isListedSameNew && oldP[0]?.is_listed !== newP[0]?.is_listed) {
+             diffs.push({ key: 'Tüm Platform Durumu', old: oldP[0]?.is_listed, new: newP[0]?.is_listed });
+          }
+          
+          newP.forEach(nP => {
+            const oP = oldP.find(p => p.platform_name === nP.platform_name);
+            if (oP) {
+              if (!(isStockSameOld && isStockSameNew) && oP.stock !== nP.stock) {
+                diffs.push({ key: `${nP.platform_name} Stok`, old: oP.stock, new: nP.stock });
+              }
+              if (!(isPriceSameOld && isPriceSameNew) && oP.price !== nP.price) {
+                diffs.push({ key: `${nP.platform_name} Fiyat`, old: oP.price, new: nP.price });
+              }
+              if (!(isListedSameOld && isListedSameNew) && oP.is_listed !== nP.is_listed) {
+                diffs.push({ key: `${nP.platform_name} Durum`, old: oP.is_listed, new: nP.is_listed });
+              }
+            }
+          });
+        } else if (key === 'images' && Array.isArray(details.before[key]) && Array.isArray(details.after[key])) {
+          const oldPaths = details.before[key].map((img: any) => img.path).join(', ');
+          const newPaths = details.after[key].map((img: any) => img.path).join(', ');
+          if (oldPaths !== newPaths) {
+            diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
+          }
+        } else {
+          diffs.push({ key, old: details.before[key], new: details.after[key] });
+        }
+      }
+    }
+  }
+
+  const renderSection = (title: string, obj: any) => (
+     <div className="mt-4 bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm">
+       <span className="font-bold text-gray-800 block mb-2">{title}:</span>
+       <pre className="text-xs overflow-x-auto text-gray-700 whitespace-pre-wrap font-mono bg-white p-3 rounded-lg border border-gray-100">
+         {JSON.stringify(obj, null, 2)}
+       </pre>
+     </div>
+  );
+
+  return (
+    <div>
+      <button 
+        onClick={() => setExpanded(true)} 
+        className="flex items-center text-xs w-full text-left text-primary font-bold hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all"
+      >
+        <FileText className="w-4 h-4 mr-1.5 flex-shrink-0" />
+        <span className="truncate">Detayları Göster</span>
+      </button>
+      
+      {expanded && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setExpanded(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border-color">
+              <h3 className="text-xl font-black text-text-main flex items-center">
+                <Activity className="w-5 h-5 text-primary mr-2" />
+                İşlem Detayları
+              </h3>
+              <button 
+                onClick={() => setExpanded(false)}
+                className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                title="Kapat"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+                <div className="text-left grid grid-cols-1 gap-4">
+                  {(details.name || details.after?.name || details.before?.name) && (
+                    <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex flex-col sm:flex-row gap-4 mb-2">
+                       <div>
+                         <div className="text-xs text-primary font-bold uppercase mb-1">Ürün İsmi</div>
+                         <div className="text-sm font-bold text-gray-800">{String(details.name || details.after?.name || details.before?.name)}</div>
+                       </div>
+                       {(details.sku || details.after?.sku || details.before?.sku) && (
+                         <div>
+                           <div className="text-xs text-primary font-bold uppercase mb-1">Stok Kodu (SKU)</div>
+                           <div className="text-sm font-bold text-gray-800">{String(details.sku || details.after?.sku || details.before?.sku)}</div>
+                         </div>
+                       )}
+                    </div>
+                  )}
+
+                  {details.before && details.after ? (
+                     <div className="bg-white border text-sm border-gray-200 rounded-xl overflow-hidden mb-4">
+                       <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-bold text-gray-800">Değişiklikler</div>
+                       <div className="divide-y divide-gray-100">
+                         {diffs.length > 0 ? (
+                           diffs.map(diff => {
+                             if (diff.isSpecialToken === 'image_update') {
+                               return (
+                                 <div key={diff.key} className="p-4 flex items-center justify-center bg-blue-50/50">
+                                   <div className="text-blue-700 font-bold text-sm bg-blue-100 px-4 py-2 rounded-lg inline-block">
+                                     🖼️ Görseller güncellendi
+                                   </div>
+                                 </div>
+                               );
+                             }
+                             return (
+                             <div key={diff.key} className="p-4 flex flex-col sm:flex-row sm:items-start gap-2">
+                               <div className="font-mono text-xs font-bold text-gray-500 w-32 shrink-0 pt-1">{diff.key}</div>
+                               <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-3">
+                                 <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-xs font-mono break-all flex-1 border border-red-100 relative min-h-[36px]">
+                                    <span className="text-[10px] uppercase font-bold text-red-500/80 absolute -top-2 left-2 bg-red-50 px-1">Önceki</span>
+                                    <div className="mt-1 whitespace-pre-wrap">{diff.old === null || diff.old === undefined ? 'null' : (typeof diff.old === 'object' ? JSON.stringify(diff.old, null, 2) : String(diff.old))}</div>
+                                 </div>
+                                 <ArrowRight className="w-4 h-4 text-gray-400 hidden sm:block shrink-0" />
+                                 <div className="bg-green-50 text-green-700 px-3 py-2 rounded-lg text-xs font-mono break-all flex-1 border border-green-100 relative min-h-[36px]">
+                                    <span className="text-[10px] uppercase font-bold text-green-500/80 absolute -top-2 left-2 bg-green-50 px-1">Sonraki</span>
+                                    <div className="mt-1 whitespace-pre-wrap">{diff.new === null || diff.new === undefined ? 'null' : (typeof diff.new === 'object' ? JSON.stringify(diff.new, null, 2) : String(diff.new))}</div>
+                                 </div>
+                               </div>
+                             </div>
+                             );
+                           })
+                         ) : (
+                           <div className="p-4 text-center text-gray-500 text-sm">
+                             Kayıtlı veride bir değişiklik bulunamadı (sadece güncellenme tarihi değişmiş olabilir).
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                  ) : (
+                    <>
+                      {details.before && renderSection("Düzenlenmeden Önce (Old)", details.before)}
+                      {details.after && renderSection("Düzenlendikten Sonra (New)", details.after)}
+                    </>
+                  )}
+                  
+                  {(() => {
+                    const extraDetails = { ...details };
+                    delete extraDetails.before;
+                    delete extraDetails.after;
+                    if (Object.keys(extraDetails).length > 0) {
+                      return renderSection("Ek Bilgiler", extraDetails);
+                    }
+                    return null;
+                  })()}
+                </div>
+            </div>
+            
+            <div className="px-6 py-4 border-t border-border-color flex justify-end">
+               <button 
+                 onClick={() => setExpanded(false)}
+                 className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
+               >
+                 Kapat
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function ActivityLogs() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -68,8 +272,8 @@ export default function ActivityLogs() {
                     <td className="py-4 px-4 font-bold text-text-main uppercase text-xs">
                       {log.entity_type}
                     </td>
-                    <td className="py-4 px-4 text-text-muted text-xs max-w-sm truncate">
-                      {log.details ? log.details : '-'}
+                    <td className="py-4 px-4 text-text-main align-top max-w-sm">
+                      <LogDetails detailsStr={log.details} />
                     </td>
                   </tr>
                 ))}

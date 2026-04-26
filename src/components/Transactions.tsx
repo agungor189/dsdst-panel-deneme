@@ -29,7 +29,7 @@ export default function Transactions({ initialType, settings }: { initialType?: 
     date: new Date().toISOString().split('T')[0],
     type: initialType || 'Income',
     category: '',
-    platform: 'Trendyol',
+    platform: '',
     amount: 0,
     product_id: '',
     note: '',
@@ -275,6 +275,7 @@ export default function Transactions({ initialType, settings }: { initialType?: 
                     <div className="space-y-1.5">
                        <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Platform</label>
                        <select value={formData.platform} onChange={e => setFormData({...formData, platform: e.target.value})} className="form-input">
+                          <option value="">Belirtilmedi</option>
                           {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
                        </select>
                     </div>
@@ -315,7 +316,7 @@ function TransactionRow({ tx, onDelete }: any) {
         <p className="text-[9px] lg:text-[10px] text-text-muted font-bold uppercase tracking-tighter">{tx.type === 'Income' ? 'Gelir' : 'Gider'}</p>
       </td>
       <td className="px-4 lg:px-6 py-4 hidden sm:table-cell">
-        <span className="px-2 py-0.5 rounded bg-bg-main border border-border-color text-text-main text-[10px] font-bold uppercase tracking-tight">{tx.platform}</span>
+        {tx.platform ? <span className="px-2 py-0.5 rounded bg-bg-main border border-border-color text-text-main text-[10px] font-bold uppercase tracking-tight">{tx.platform}</span> : <span className="text-gray-400 text-xs">-</span>}
       </td>
       <td className={cn("px-4 lg:px-6 py-4 font-bold text-sm lg:text-base", tx.type === 'Income' ? 'text-success' : 'text-danger')}>
         {tx.type === 'Income' ? '+' : '-'}{formatCurrency(tx.amount)}

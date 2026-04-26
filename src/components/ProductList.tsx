@@ -203,8 +203,10 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
 
   const [deletingAll, setDeletingAll] = useState(false);
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deleteAllInput, setDeleteAllInput] = useState("");
 
   const deleteAllProducts = async () => {
+    if (deleteAllInput !== "SİL") return;
     try {
       setDeletingAll(true);
       const res = await api.delete('/products');
@@ -280,35 +282,16 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
             Şablon İndir
           </button>
           {products.length > 0 && (
-            <div className="relative">
-              {!showDeleteAllConfirm ? (
-                <button 
-                  onClick={() => setShowDeleteAllConfirm(true)}
-                  className="px-4 h-11 border border-border-color bg-white rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-50 hover:border-rose-200 transition-all flex items-center shadow-sm"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Tümünü Sil
-                </button>
-              ) : (
-                <div className="flex items-center space-x-2 bg-rose-50 border border-rose-200 p-1 rounded-xl animate-in fade-in zoom-in duration-200">
-                  <span className="text-[10px] font-bold text-rose-500 uppercase tracking-tight px-2">Emin misiniz?</span>
-                  <button 
-                    onClick={deleteAllProducts}
-                    disabled={deletingAll}
-                    className="px-3 h-9 bg-rose-500 text-white rounded-lg font-bold text-xs hover:bg-rose-600 transition-colors shadow-sm disabled:opacity-50"
-                  >
-                    {deletingAll ? "Siliniyor..." : "Evet"}
-                  </button>
-                  <button 
-                    onClick={() => setShowDeleteAllConfirm(false)}
-                    disabled={deletingAll}
-                    className="px-3 h-9 bg-white border border-border-color text-text-muted rounded-lg font-bold text-xs hover:bg-gray-50 transition-colors"
-                  >
-                    Vazgeç
-                  </button>
-                </div>
-              )}
-            </div>
+            <button 
+              onClick={() => {
+                setDeleteAllInput("");
+                setShowDeleteAllConfirm(true);
+              }}
+              className="px-4 h-11 border border-border-color bg-white rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-50 hover:border-rose-200 transition-all flex items-center shadow-sm"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Tümünü Sil
+            </button>
           )}
           <button 
             onClick={onAddProduct}
@@ -319,6 +302,47 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
           </button>
         </div>
       </div>
+
+      {showDeleteAllConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowDeleteAllConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-rose-500" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Tüm Ürünleri Sil</h3>
+              <p className="text-gray-500 text-sm mb-6">
+                Bu işlem geri alınamaz. Onaylamak için lütfen kutuya büyük harflerle <strong>SİL</strong> yazın.
+              </p>
+              <div className="mb-6">
+                <input
+                  type="text"
+                  value={deleteAllInput}
+                  onChange={(e) => setDeleteAllInput(e.target.value)}
+                  placeholder="SİL yazın"
+                  className="w-full text-center tracking-widest font-bold h-11 bg-gray-50 border border-gray-200 rounded-xl focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={deleteAllProducts}
+                  disabled={deletingAll || deleteAllInput !== "SİL"}
+                  className="w-full py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {deletingAll ? "Siliniyor..." : "Evet, Tümünü Seçili Sil"}
+                </button>
+                <button
+                  onClick={() => setShowDeleteAllConfirm(false)}
+                  disabled={deletingAll}
+                  className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold transition-colors disabled:opacity-50"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div className="card p-3 lg:p-4 flex flex-col lg:flex-row items-stretch lg:items-center gap-3 lg:gap-4 bg-white shadow-sm">
@@ -435,7 +459,7 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
                       </div>
                     </td>
                     <td className="px-4 lg:px-6 py-4 lg:py-5 hidden md:table-cell">
-                      <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color">
+                      <span className="inline-block whitespace-nowrap text-[10px] font-bold text-text-muted uppercase tracking-widest bg-bg-main px-2 py-1 rounded border border-border-color">
                         {p.category}
                       </span>
                     </td>

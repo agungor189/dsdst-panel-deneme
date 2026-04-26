@@ -383,6 +383,12 @@ async function startServer() {
     } = req.body;
     
     db.transaction(() => {
+      const beforeState: any = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
+      if (beforeState) {
+        beforeState.platforms = db.prepare("SELECT platform_name, stock, price, is_listed FROM product_platforms WHERE product_id = ?").all(req.params.id);
+        beforeState.images = db.prepare("SELECT id, path, sort_order FROM product_images WHERE product_id = ? ORDER BY sort_order ASC").all(req.params.id);
+      }
+
       db.prepare(`
         UPDATE products SET 
           name=?, title=?, warehouse_location=?, sku=?, barcode=?, category=?, model=?, description=?, 
@@ -407,9 +413,6 @@ async function startServer() {
       }
 
       if (images && Array.isArray(images)) {
-        // Only insert if it doesn't already exist or handle syncing.
-        // For simplicity, if they pass images, we might want to refresh them or only add new ones.
-        // Let's assume on edit we only pass NEW URLs to add.
         const insertImg = db.prepare("INSERT INTO product_images (id, product_id, path, sort_order) VALUES (?, ?, ?, ?)");
         images.forEach((img: any, idx: number) => {
           if (img.id && img.id.startsWith('temp-')) {
@@ -417,7 +420,16 @@ async function startServer() {
           }
         });
       }
-      logActivity('UPDATE', 'product', req.params.id, { name, title, status });
+      
+      const afterState: any = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
+      if (afterState) {
+        afterState.platforms = db.prepare("SELECT platform_name, stock, price, is_listed FROM product_platforms WHERE product_id = ?").all(req.params.id);
+        afterState.images = db.prepare("SELECT id, path, sort_order FROM product_images WHERE product_id = ? ORDER BY sort_order ASC").all(req.params.id);
+        if (req.body.imageChanged) {
+          afterState.imageChanged = true;
+        }
+      }
+      logActivity('UPDATE', 'product', req.params.id, { before: beforeState, after: afterState });
     })();
 
     res.json({ success: true });
@@ -432,8 +444,9 @@ async function startServer() {
   });
 
   app.delete("/api/products/:id", (req, res) => {
+    const beforeState = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
     db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'product', req.params.id);
+    logActivity('DELETE', 'product', req.params.id, { before: beforeState });
     res.json({ success: true });
   });
 
@@ -470,13 +483,16 @@ async function startServer() {
     const { product_id, platform_name, change_amount, reason } = req.body;
     
     db.transaction(() => {
+      const beforeState = db.prepare("SELECT stock FROM product_platforms WHERE product_id = ? AND platform_name = ?").get(product_id, platform_name);
+
       db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE product_id = ? AND platform_name = ?")
         .run(change_amount, product_id, platform_name);
       
       db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
         .run(uuidv4(), product_id, platform_name, change_amount, reason);
       
-      logActivity('UPDATE_STOCK', 'product', product_id, { platform_name, change_amount, reason });
+      const afterState = db.prepare("SELECT stock FROM product_platforms WHERE product_id = ? AND platform_name = ?").get(product_id, platform_name);
+      logActivity('UPDATE_STOCK', 'product', product_id, { platform_name, change_amount, reason, before: beforeState, after: afterState });
     })();
 
     res.json({ success: true });
@@ -510,8 +526,9 @@ async function startServer() {
   });
 
   app.delete("/api/transactions/:id", (req, res) => {
+    const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
     db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'transaction', req.params.id);
+    logActivity('DELETE', 'transaction', req.params.id, { before: beforeState });
     res.json({ success: true });
   });
 
@@ -533,8 +550,9 @@ async function startServer() {
   });
 
   app.delete("/api/recurring-payments/:id", (req, res) => {
+    const beforeState = db.prepare("SELECT * FROM recurring_payments WHERE id = ?").get(req.params.id);
     db.prepare("DELETE FROM recurring_payments WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'recurring_payment', req.params.id);
+    logActivity('DELETE', 'recurring_payment', req.params.id, { before: beforeState });
     res.json({ success: true });
   });
 
@@ -588,10 +606,19 @@ async function startServer() {
     const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
     
     db.transaction(() => {
+      const beforeState: any = {};
+      const afterState: any = {};
+      
+      const getStmt = db.prepare("SELECT value FROM settings WHERE key = ?");
       for (const [key, value] of Object.entries(body)) {
-        stmt.run(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+         const oldRow = getStmt.get(key) as any;
+         beforeState[key] = oldRow ? oldRow.value : null;
+         
+         const newValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+         stmt.run(key, newValue);
+         afterState[key] = newValue;
       }
-      logActivity('UPDATE', 'settings', 'global', Object.keys(body));
+      logActivity('UPDATE', 'settings', 'global', { before: beforeState, after: afterState });
     })();
     
     res.json({ success: true });
