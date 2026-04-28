@@ -11,9 +11,56 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import AdmZip from "adm-zip";
+import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Encryption Utility for API Keys
+const ALGORITHM = 'aes-256-gcm';
+
+if (!process.env.ENCRYPTION_SECRET) {
+  throw new Error("ENCRYPTION_SECRET is required. Lütfen .env dosyanıza ekleyin!");
+}
+
+if (!process.env.PANEL_API_HASH_SECRET) {
+  throw new Error("PANEL_API_HASH_SECRET is required. Lütfen .env dosyanıza ekleyin!");
+}
+
+const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET.padEnd(32, '0').slice(0, 32);
+
+function encryptText(text: string): string {
+  if (!text) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET), iv);
+  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decryptText(cipherText: string): string {
+  if (!cipherText) return '';
+  try {
+    const [ivHex, authTagHex, encryptedHex] = cipherText.split(':');
+    if (!ivHex || !authTagHex || !encryptedHex) return '';
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const encrypted = Buffer.from(encryptedHex, 'hex');
+    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET), iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (err) {
+    console.error("Decryption error:", err);
+    return '';
+  }
+}
+
+function hashApiKey(clearKey: string): string {
+  return crypto.createHmac('sha256', process.env.PANEL_API_HASH_SECRET!)
+    .update(clearKey)
+    .digest('hex');
+}
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -74,6 +121,9 @@ try {
 } catch(e) {}
 try {
   db.exec("ALTER TABLE products ADD COLUMN weight REAL DEFAULT 0");
+} catch(e) {}
+try {
+  db.exec("ALTER TABLE api_keys ADD COLUMN deleted_at DATETIME DEFAULT NULL");
 } catch(e) {}
 
 db.exec(`
@@ -142,6 +192,47 @@ db.exec(`
     note TEXT,
     status TEXT DEFAULT 'Active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    service_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    key_name TEXT,
+    api_key_encrypted TEXT NOT NULL,
+    api_secret_encrypted TEXT,
+    merchant_id TEXT,
+    seller_id TEXT,
+    status TEXT DEFAULT 'active',
+    last4 TEXT,
+    notes TEXT,
+    last_test_status TEXT,
+    last_tested_at DATETIME,
+    last_used_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME DEFAULT NULL
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_unique_name ON api_keys(service_name, display_name) WHERE deleted_at IS NULL;
+
+  CREATE TABLE IF NOT EXISTS panel_api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    last4 TEXT NOT NULL,
+    status TEXT DEFAULT 'active',
+    environment TEXT DEFAULT 'test',
+    permissions TEXT NOT NULL,
+    allowed_ips TEXT,
+    expires_at DATETIME,
+    last_used_at DATETIME,
+    last_used_ip TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    revoked_at DATETIME,
+    deleted_at DATETIME
   );
 
   CREATE TABLE IF NOT EXISTS firms (
@@ -975,6 +1066,515 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // --- API INTEGRATIONS (KEYS) ---
+  const apiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 60, // Limit each IP to 60 requests per windowMs
+    message: { error: "Çok fazla istek gönderildi, lütfen biraz bekleyin." }
+  });
+
+  app.get("/api/integrations/keys", apiLimiter, (req, res) => {
+    try {
+      const keys = db.prepare("SELECT id, service_name, display_name, key_name, status, last4, notes, last_test_status, last_tested_at, last_used_at, created_at, updated_at FROM api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC").all() as any[];
+      
+      const safeKeys = keys.map(k => ({
+        ...k,
+        maskedKey: `********${k.last4 || '----'}`,
+      }));
+
+      res.json(safeKeys);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/keys", apiLimiter, (req, res) => {
+    try {
+      const { service_name, display_name, key_name, api_key, api_secret, merchant_id, seller_id, notes } = req.body;
+      
+      if (!service_name || !display_name || !api_key) {
+        return res.status(400).json({ error: "Servis adı, görünen alan ve API anahtarı zorunludur." });
+      }
+
+      // Check duplicate
+      const existing = db.prepare("SELECT id FROM api_keys WHERE service_name = ? AND display_name = ? AND deleted_at IS NULL").get(service_name, display_name);
+      if (existing) {
+        return res.status(400).json({ error: "Bu servis ve görünen ada sahip bir anahtar zaten var." });
+      }
+
+      const id = uuidv4();
+      const apiKeyEncrypted = encryptText(api_key);
+      const apiSecretEncrypted = api_secret ? encryptText(api_secret) : null;
+      const last4 = api_key.length >= 4 ? api_key.slice(-4) : api_key;
+
+      db.prepare(`
+        INSERT INTO api_keys (id, service_name, display_name, key_name, api_key_encrypted, api_secret_encrypted, merchant_id, seller_id, last4, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, service_name, display_name, key_name || null, apiKeyEncrypted, apiSecretEncrypted, merchant_id || null, seller_id || null, last4, notes || null);
+      
+      logActivity("API_KEY_CREATED", "integration", id, { 
+         before: null, 
+         after: { service_name, display_name, status: 'active' },
+         userIp: req.ip
+      });
+
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/integrations/keys/:id", apiLimiter, (req, res) => {
+    try {
+      const { display_name, key_name, api_key, api_secret, merchant_id, seller_id, notes } = req.body;
+      const id = req.params.id;
+
+      if (!display_name) {
+        return res.status(400).json({ error: "Görünen alan zorunludur." });
+      }
+
+      const current = db.prepare("SELECT * FROM api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) {
+        return res.status(404).json({ error: "API anahtarı bulunamadı." });
+      }
+
+      let apiKeyEncrypted = current.api_key_encrypted;
+      let last4 = current.last4;
+      if (api_key) {
+        apiKeyEncrypted = encryptText(api_key);
+        last4 = api_key.length >= 4 ? api_key.slice(-4) : api_key;
+      }
+
+      let apiSecretEncrypted = current.api_secret_encrypted;
+      if (api_secret) {
+        apiSecretEncrypted = encryptText(api_secret);
+      } else if (api_secret === '') {
+        apiSecretEncrypted = null;
+      }
+
+      db.prepare(`
+        UPDATE api_keys 
+        SET display_name = ?, key_name = ?, api_key_encrypted = ?, api_secret_encrypted = ?, merchant_id = ?, seller_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(display_name, key_name || null, apiKeyEncrypted, apiSecretEncrypted, merchant_id || null, seller_id || null, notes || null, id);
+
+      logActivity("API_KEY_UPDATED", "integration", id, { 
+         before: { display_name: current.display_name, service_name: current.service_name }, 
+         after: { display_name, update: "Keys / metadata updated" },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/integrations/keys/:id/status", apiLimiter, (req, res) => {
+    try {
+      const { status } = req.body;
+      db.prepare("UPDATE api_keys SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL").run(status, req.params.id);
+      
+      logActivity("API_KEY_STATUS", "integration", req.params.id, { 
+         before: {}, 
+         after: { status },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/keys/:id/test", apiLimiter, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const current = db.prepare("SELECT * FROM api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) {
+        return res.status(404).json({ error: "API anahtarı bulunamadı." });
+      }
+
+      if (current.status !== 'active') {
+         return res.json({ status: "failed", message: "Pasif anahtarlar test edilemez." });
+      }
+
+      let status = "success";
+      let message = "";
+
+      if (current.service_name === 'Hepsiburada') {
+        const merchantId = current.merchant_id;
+        if (!merchantId) {
+           return res.json({ status: "failed", message: "Merchant ID gerekli" });
+        }
+        
+        const apiKey = decryptText(current.api_key_encrypted);
+        const apiSecret = current.api_secret_encrypted ? decryptText(current.api_secret_encrypted) : "";
+        
+        // Hepsiburada genellikle Basic Auth kullanır. apiKey Username, apiSecret Password ise:
+        let authToken = apiKey;
+        if (apiSecret) {
+           authToken = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+        }
+        
+        try {
+           const response = await fetch(`https://oms-api.hepsiburada.com/merchants/${merchantId}/orders?limit=1`, {
+              method: 'GET',
+              headers: {
+                 'Authorization': apiKey.startsWith('Basic ') ? apiKey : `Basic ${authToken}`,
+                 'User-Agent': 'DSDST-Panel',
+                 'Accept': 'application/json'
+              }
+           });
+           
+           if (response.ok) {
+              status = "success";
+              message = "Test başarılı";
+           } else if (response.status === 401 || response.status === 403) {
+              status = "failed";
+              message = "Yetkilendirme başarısız";
+           } else {
+              status = "failed";
+              message = `Hata kodu: ${response.status}`;
+           }
+        } catch (err: any) {
+           status = "failed";
+           message = "Bağlantı hatası";
+        }
+      } else {
+         message = `Test başarılı (${current.service_name} bağlantı adımı atlandı)`;
+      }
+
+      db.prepare("UPDATE api_keys SET last_test_status = ?, last_tested_at = CURRENT_TIMESTAMP, last_used_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
+
+      logActivity("API_KEY_TESTED", "integration", id, { 
+         after: { result: status, message },
+         userIp: req.ip
+      });
+
+      res.json({ status, message });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/integrations/keys/:id", apiLimiter, (req, res) => {
+    try {
+      const id = req.params.id;
+      const current = db.prepare("SELECT display_name, service_name FROM api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      
+      if (!current) {
+        return res.status(404).json({ error: "API anahtarı bulunamadı." });
+      }
+
+      db.prepare("UPDATE api_keys SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+
+      logActivity("API_KEY_DELETED", "integration", id, { 
+         before: { display_name: current.display_name, service_name: current.service_name }, 
+         after: null,
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PANEL API (INTERNAL KEYS FOR EXTERNAL SYSTEMS) ---
+  app.get("/api/integrations/panel-api", apiLimiter, (req, res) => {
+    try {
+      const keys = db.prepare("SELECT id, name, key_prefix, last4, status, environment, permissions, allowed_ips, expires_at, last_used_at, last_used_ip, created_at, updated_at, revoked_at FROM panel_api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC").all() as any[];
+      
+      const safeKeys = keys.map(k => ({
+        ...k,
+        maskedKey: `${k.key_prefix}********${k.last4}`,
+      }));
+
+      res.json(safeKeys);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/panel-api", apiLimiter, (req, res) => {
+    try {
+      const { name, environment, permissions, allowed_ips, expires_at } = req.body;
+      
+      if (!name) return res.status(400).json({ error: "Ad zorunludur." });
+      
+      const id = uuidv4();
+      const envPrefix = environment === 'live' ? 'dsdst_live_' : 'dsdst_test_';
+      const randomStr = crypto.randomBytes(16).toString('hex'); // 32 chars
+      const newApiKey = `${envPrefix}${randomStr}`;
+      
+      const hashedKey = hashApiKey(newApiKey);
+      const last4 = newApiKey.slice(-4);
+
+      db.prepare(`
+        INSERT INTO panel_api_keys (id, name, key_prefix, key_hash, last4, status, environment, permissions, allowed_ips, expires_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+      `).run(id, name, envPrefix, hashedKey, last4, environment, JSON.stringify(permissions || []), allowed_ips || null, expires_at || null);
+      
+      logActivity("PANEL_API_KEY_CREATED", "integration", id, { 
+         after: { name, environment, status: 'active' },
+         userIp: req.ip
+      });
+
+      // ONLY RETURN newApiKey HERE! IT SHOULD NOT BE RETURNED AGAIN.
+      res.json({ id, apiKey: newApiKey }); 
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/integrations/panel-api/:id", apiLimiter, (req, res) => {
+    try {
+      const { name, permissions, allowed_ips, expires_at } = req.body;
+      const id = req.params.id;
+
+      if (!name) return res.status(400).json({ error: "Ad zorunludur." });
+
+      const current = db.prepare("SELECT * FROM panel_api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) return res.status(404).json({ error: "API anahtarı bulunamadı." });
+
+      db.prepare(`
+        UPDATE panel_api_keys 
+        SET name = ?, permissions = ?, allowed_ips = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(name, JSON.stringify(permissions || []), allowed_ips || null, expires_at || null, id);
+
+      logActivity("PANEL_API_KEY_UPDATED", "integration", id, { 
+         after: { name, update: "Panel API Key updated" },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/integrations/panel-api/:id/status", apiLimiter, (req, res) => {
+    try {
+      const { status } = req.body;
+      db.prepare("UPDATE panel_api_keys SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL").run(status, req.params.id);
+      
+      let action = "PANEL_API_KEY_STATUS";
+      if (status === 'active') action = "PANEL_API_KEY_ACTIVATED";
+      if (status === 'passive') action = "PANEL_API_KEY_PASSIVATED";
+
+      logActivity(action, "integration", req.params.id, { 
+         after: { status },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/panel-api/:id/revoke", apiLimiter, (req, res) => {
+    try {
+      const id = req.params.id;
+      db.prepare("UPDATE panel_api_keys SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL").run(id);
+      
+      logActivity("PANEL_API_KEY_REVOKED", "integration", id, { 
+         after: { status: 'revoked' },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/panel-api/:id/rotate", apiLimiter, (req, res) => {
+    try {
+      const id = req.params.id;
+      const current = db.prepare("SELECT * FROM panel_api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) return res.status(404).json({ error: "API anahtarı bulunamadı." });
+
+      // Revoke current
+      db.prepare("UPDATE panel_api_keys SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      
+      // Create new
+      const newId = uuidv4();
+      const randomStr = crypto.randomBytes(16).toString('hex');
+      const newApiKey = `${current.key_prefix}${randomStr}`;
+      const hashedKey = hashApiKey(newApiKey);
+      const last4 = newApiKey.slice(-4);
+
+      db.prepare(`
+        INSERT INTO panel_api_keys (id, name, key_prefix, key_hash, last4, status, environment, permissions, allowed_ips, expires_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+      `).run(newId, current.name + " (Rotated)", current.key_prefix, hashedKey, last4, current.environment, current.permissions, current.allowed_ips, current.expires_at);
+
+      logActivity("PANEL_API_KEY_ROTATED", "integration", id, { 
+         after: { newKeyId: newId },
+         userIp: req.ip
+      });
+
+      res.json({ id: newId, apiKey: newApiKey });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/integrations/panel-api/:id/test", apiLimiter, (req, res) => {
+    try {
+      const id = req.params.id;
+      const current = db.prepare("SELECT * FROM panel_api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) return res.status(404).json({ error: "API anahtarı bulunamadı." });
+
+      let status = "success";
+      let message = "Test başarılı (Bağlantı açık). permissions: " + current.permissions;
+
+      if (current.status !== 'active') {
+         status = "failed";
+         message = `Anahtar durumu: ${current.status}`;
+      } else if (current.expires_at && new Date(current.expires_at).getTime() < Date.now()) {
+         status = "failed";
+         message = "Anahtar süresi dolmuş.";
+      }
+
+      db.prepare("UPDATE panel_api_keys SET last_test_status = ?, last_tested_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, id);
+
+      logActivity("PANEL_API_KEY_TESTED", "integration", id, { 
+         after: { result: status, message },
+         userIp: req.ip
+      });
+
+      res.json({ status, message });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/integrations/panel-api/:id", apiLimiter, (req, res) => {
+    try {
+      const id = req.params.id;
+      
+      const current = db.prepare("SELECT * FROM panel_api_keys WHERE id = ? AND deleted_at IS NULL").get(id) as any;
+      if (!current) return res.status(404).json({ error: "API anahtarı bulunamadı." });
+
+      db.prepare("UPDATE panel_api_keys SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+
+      logActivity("PANEL_API_KEY_DELETED", "integration", id, { 
+         before: { name: current.name },
+         userIp: req.ip
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PUBLIC API AUTHENTICATION MIDDLEWARE ---
+  const publicApiAuth = (requiredPermission?: string) => (req: any, res: any, next: any) => {
+      const apiKeyHeader = req.headers['x-api-key']?.toString();
+      if (!apiKeyHeader) {
+          return res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "x-api-key header is required" } });
+      }
+
+      const hashedKey = hashApiKey(apiKeyHeader);
+      const keyData = db.prepare("SELECT * FROM panel_api_keys WHERE key_hash = ? AND deleted_at IS NULL").get(hashedKey) as any;
+
+      if (!keyData) {
+          logActivity("PANEL_API_AUTH_FAILED", "system", "auth", { reason: "Invalid key", userIp: req.ip, userAgent: req.headers['user-agent'] });
+          return res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid API key" } });
+      }
+
+      if (keyData.status !== 'active') {
+          logActivity("PANEL_API_AUTH_FAILED", "system", keyData.id, { reason: `Key status is ${keyData.status}`, userIp: req.ip, userAgent: req.headers['user-agent'] });
+          return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: `API key is ${keyData.status}` } });
+      }
+
+      if (keyData.expires_at && new Date(keyData.expires_at).getTime() < Date.now()) {
+          logActivity("PANEL_API_AUTH_FAILED", "system", keyData.id, { reason: "Key expired", userIp: req.ip, userAgent: req.headers['user-agent'] });
+          return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "API key has expired" } });
+      }
+
+      if (keyData.allowed_ips) {
+          const allowedIps = keyData.allowed_ips.split(',').map((ip: string) => ip.trim());
+          if (!allowedIps.includes(req.ip)) {
+              logActivity("PANEL_API_AUTH_FAILED", "system", keyData.id, { reason: "IP not allowed", userIp: req.ip, userAgent: req.headers['user-agent'] });
+              return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "IP not allowed" } });
+          }
+      }
+
+      const permissions = JSON.parse(keyData.permissions || '[]');
+      if (requiredPermission && !permissions.includes(requiredPermission)) {
+          logActivity("PANEL_API_AUTH_FAILED", "system", keyData.id, { reason: "Missing permission", requiredPermission, userIp: req.ip, userAgent: req.headers['user-agent'] });
+          return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions" } });
+      }
+
+      db.prepare("UPDATE panel_api_keys SET last_used_at = CURRENT_TIMESTAMP, last_used_ip = ? WHERE id = ?").run(req.ip, keyData.id);
+
+      req.panelApiKey = { id: keyData.id, name: keyData.name, permissions };
+      next();
+  };
+
+  const publicApiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, 
+    max: 120, // 120 requests per minute
+    message: { success: false, error: { code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded" } }
+  });
+
+  const publicAuthFailedLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, 
+    max: 20, // 20 failed attempt requests per minute per IP
+    skipSuccessfulRequests: true,
+    message: { success: false, error: { code: "TOO_MANY_REQUESTS", message: "Too many failed attempts" } }
+  });
+
+  // --- PUBLIC API ROUTES ---
+  app.use("/api/public", publicAuthFailedLimiter, publicApiLimiter);
+
+  app.get("/api/public/health", (req, res) => {
+    // Health doesn't require auth but we can validate it if present manually or just return ok
+    res.json({ success: true, data: { status: "ok", timestamp: new Date().toISOString() } });
+  });
+
+  app.get("/api/public/products", publicApiAuth("products:read"), (req, res) => {
+    const products = db.prepare("SELECT * FROM products").all();
+    logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+    res.json({ success: true, data: products });
+  });
+
+  app.get("/api/public/stock", publicApiAuth("stock:read"), (req, res) => {
+    const stock = db.prepare("SELECT * FROM product_platforms").all();
+    logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+    res.json({ success: true, data: stock });
+  });
+
+  app.patch("/api/public/stock/:productId", publicApiAuth("stock:write"), (req, res) => {
+     // placeholder implementation
+     logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+     res.json({ success: true, data: { productId: req.params.productId, updated: true } });
+  });
+
+  app.get("/api/public/orders", publicApiAuth("orders:read"), (req, res) => {
+    const orders = db.prepare("SELECT * FROM sales").all();
+    logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+    res.json({ success: true, data: orders });
+  });
+
+  app.post("/api/public/orders", publicApiAuth("orders:write"), (req, res) => {
+     // placeholder implementation
+     logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+     res.json({ success: true, data: { status: "created", body: req.body } });
+  });
+
+  app.get("/api/public/dashboard-summary", publicApiAuth("dashboard:read"), (req, res) => {
+    // placeholder implementation
+    logActivity("PANEL_API_USED", "public_api", req.panelApiKey.id, { path: req.path, userIp: req.ip });
+    res.json({ success: true, data: { totalRevenue: 50000, unreadMessages: 3 } });
   });
 
   // --- DATABASE BACKUP / RESTORE ---

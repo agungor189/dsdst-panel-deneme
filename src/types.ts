@@ -73,6 +73,42 @@ export interface DashboardMetrics {
   totalChangedValues?: number;
 }
 
+export interface ApiKey {
+  id: string;
+  service_name: string;
+  display_name: string;
+  key_name?: string;
+  merchant_id?: string;
+  seller_id?: string;
+  status: 'active' | 'passive';
+  last4: string;
+  maskedKey?: string;
+  notes?: string;
+  last_test_status?: 'success' | 'failed';
+  last_tested_at?: string;
+  last_used_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PanelApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  last4: string;
+  status: 'active' | 'passive' | 'revoked';
+  environment: 'live' | 'test';
+  permissions: string;
+  allowed_ips?: string;
+  expires_at?: string;
+  last_used_at?: string;
+  last_used_ip?: string;
+  created_at: string;
+  updated_at: string;
+  revoked_at?: string;
+  maskedKey: string;
+}
+
 export interface Settings {
   company_name: string;
   low_stock_threshold: number;

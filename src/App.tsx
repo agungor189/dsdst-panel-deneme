@@ -16,7 +16,9 @@ import {
   LogOut,
   Activity,
   Briefcase,
-  ShoppingCart
+  ShoppingCart,
+  Key,
+  TerminalSquare
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
@@ -37,6 +39,8 @@ import B2BFirms from './components/b2b/B2BFirms';
 import B2BFirmDetail from './components/b2b/B2BFirmDetail';
 import B2BFirmForm from './components/b2b/B2BFirmForm';
 import Sales from './components/sales/Sales';
+import ApiKeys from './components/integrations/ApiKeys';
+import PanelApiKeys from './components/integrations/PanelApiKeys';
 
 export const AuthContext = createContext<{ role: 'admin' | 'user', isReadOnly: boolean }>({ role: 'admin', isReadOnly: false });
 export const useAuth = () => useContext(AuthContext);
@@ -45,7 +49,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales';
+type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -207,6 +211,45 @@ export default function App() {
               {(isSidebarOpen || isMobileMenuOpen) && <span>{item.label}</span>}
             </button>
           ))}
+          
+          {(isSidebarOpen || isMobileMenuOpen) && (
+            <div className="pt-4 pb-2 px-6">
+              <p className="text-white/40 text-xs font-bold uppercase tracking-wider">Entegrasyonlar</p>
+            </div>
+          )}
+          <button
+              onClick={() => {
+                setCurrentView('api-keys');
+                setIsMobileMenuOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center px-6 py-3.5 transition-all text-sm font-medium group relative",
+                currentView === 'api-keys'
+                  ? "bg-primary/10 text-white border-l-4 border-primary" 
+                  : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+              )}
+              title="API Anahtarları"
+            >
+              <Key className={cn("w-5 h-5", (isSidebarOpen || isMobileMenuOpen) ? "mr-3" : "mx-auto")} />
+              {(isSidebarOpen || isMobileMenuOpen) && <span>API Anahtarları</span>}
+          </button>
+          
+          <button
+              onClick={() => {
+                setCurrentView('panel-api');
+                setIsMobileMenuOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center px-6 py-3.5 transition-all text-sm font-medium group relative",
+                currentView === 'panel-api'
+                  ? "bg-purple-500/10 text-white border-l-4 border-purple-500" 
+                  : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+              )}
+              title="Panel API"
+            >
+              <TerminalSquare className={cn("w-5 h-5", (isSidebarOpen || isMobileMenuOpen) ? "mr-3" : "mx-auto")} />
+              {(isSidebarOpen || isMobileMenuOpen) && <span>Panel API</span>}
+          </button>
         </nav>
 
         <div className="mt-auto border-t border-white/10 pb-4 pt-2 shrink-0">
@@ -385,6 +428,8 @@ export default function App() {
           {currentView === 'analytics' && <Analytics settings={settings} />}
           {currentView === 'activity-logs' && <ActivityLogs />}
           {currentView === 'settings' && <SettingsView onUpdate={loadSettings} />}
+          {currentView === 'api-keys' && <ApiKeys />}
+          {currentView === 'panel-api' && <PanelApiKeys />}
         </div>
         {showLogoutConfirm && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={handleCancelLogout}>
