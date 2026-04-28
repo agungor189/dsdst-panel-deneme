@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   Package,
   Activity,
+  RefreshCw,
 } from 'lucide-react';
 import { api, formatCurrency } from '../lib/api';
 import { DashboardMetrics, Product } from '../types';
@@ -45,35 +46,40 @@ interface DashboardProps {
   onProductClick: (id: string) => void;
 }
 
+// Module-level cache for instant load on back-navigation
+let cachedDashboardData: any = null;
+
 export default function Dashboard({ onNavigate, onProductClick }: DashboardProps) {
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [chartData, setChartData] = useState<any>(null);
-  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
-  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [data, setData] = useState<any>(cachedDashboardData);
+  const [loading, setLoading] = useState<boolean>(!cachedDashboardData);
+  const [error, setError] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [showLowStockModal, setShowLowStockModal] = useState(false);
 
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true);
     try {
-      const metricsData = await api.get('/dashboard/metrics');
-      const chartsData = await api.get('/dashboard/charts');
-      const allProducts = await api.get('/products');
-      const settings = await api.get('/settings');
-      const transactions = await api.get('/transactions');
-
-      setMetrics(metricsData);
-      setChartData(chartsData);
-      
-      const lowStockProductsList = metricsData.lowStockProducts || [];
-      setLowStockProducts(lowStockProductsList);
-      setRecentTransactions(transactions.slice(0, 10));
+      const result = await api.get('/dashboard-summary');
+      cachedDashboardData = result;
+      setData(result);
+      setError(false);
     } catch (err) {
       console.error("Dashboard load error", err);
+      if (!cachedDashboardData) setError(true);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const metrics = data?.metrics;
+  const chartData = data?.charts;
+  const recentTransactions = data?.recentTransactions || [];
+  const lowStockProducts = metrics?.lowStockProducts || [];
 
   const barChartOptions = {
     responsive: true,
@@ -118,12 +124,48 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
     ]
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="p-5 rounded-xl bg-white border border-border-color shadow-sm h-[130px] flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-lg bg-gray-100 animate-pulse"></div>
+              </div>
+              <div>
+                <div className="w-24 h-3 bg-gray-100 rounded animate-pulse mb-2"></div>
+                <div className="w-32 h-6 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 card p-6 h-[400px] flex items-center justify-center">
+            <div className="w-full h-full bg-gray-50 rounded-lg animate-pulse"></div>
+          </div>
+          <div className="card p-6 h-[400px] flex items-center justify-center">
+            <div className="w-full h-full bg-gray-50 rounded-lg animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8 animate-in fade-in duration-500 relative">
+      {refreshing && (
+        <div className="absolute top-0 right-0 flex items-center space-x-2 text-xs font-semibold text-primary/70">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span>Güncelleniyor...</span>
+        </div>
+      )}
+
       {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <MetricCard 
           title="Bu Ay Toplam Ciro" 
+          error={error}
           value={formatCurrency(metrics?.totalRevenue || 0)} 
           icon={TrendingUp} 
           trend="↑ 12% Geçen aya göre" 
@@ -133,6 +175,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
         />
         <MetricCard 
           title="Toplam Giderler" 
+          error={error}
           value={formatCurrency(metrics?.totalExpenses || 0)} 
           icon={TrendingDown} 
           trend="↑ 5% Lojistik artışı" 
@@ -142,6 +185,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
         />
         <MetricCard 
           title="Tahmini Net Kar" 
+          error={error}
           value={formatCurrency(metrics?.netProfit || 0)} 
           icon={DollarSign} 
           trend={`Marj: %${metrics?.totalRevenue ? ((metrics.netProfit / metrics.totalRevenue) * 100).toFixed(1) : '0'}`} 
@@ -151,6 +195,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
         />
         <MetricCard 
           title="Kritik Stok" 
+          error={error}
           value={`${metrics?.lowStockCount || 0} Ürün`} 
           icon={AlertTriangle} 
           trend="Acil sipariş gerekli"
@@ -172,7 +217,11 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
             </div>
           </div>
           <div className="h-[280px]">
-             <Line data={lineChartData} options={barChartOptions} />
+             {error ? (
+               <div className="h-full flex items-center justify-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
+             ) : (
+               <Line data={lineChartData} options={barChartOptions} />
+             )}
           </div>
         </div>
 
@@ -180,7 +229,11 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
         <div className="card p-6">
           <h3 className="text-base font-semibold text-text-main mb-8 pb-4 border-b border-border-color">Platform Bazlı Satış</h3>
           <div className="h-[280px]">
-             <Bar data={platformChartData} options={barChartOptions} />
+             {error ? (
+               <div className="h-full flex items-center justify-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
+             ) : (
+               <Bar data={platformChartData} options={barChartOptions} />
+             )}
           </div>
         </div>
       </div>
@@ -197,7 +250,10 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
               Hepsini Gör
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto min-h-[200px]">
+            {error ? (
+               <div className="p-8 text-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
+            ) : (
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-bg-main text-[11px] uppercase tracking-wider text-text-muted font-bold">
@@ -208,7 +264,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-color">
-                {recentTransactions.map((tx) => (
+                {recentTransactions.map((tx: any) => (
                   <tr key={tx.id} className="hover:bg-bg-main transition-colors text-sm">
                     <td className="px-4 lg:px-6 py-4 text-text-muted">{new Date(tx.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}</td>
                     <td className="px-4 lg:px-6 py-4 font-medium">{tx.category}</td>
@@ -224,53 +280,66 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
                 ))}
               </tbody>
             </table>
+            )}
           </div>
         </div>
 
         {/* Low Stock Alerts */}
         <div className="card">
-          <div className="px-6 py-4 border-b border-border-color">
+          <div className="px-6 py-4 border-b border-border-color flex items-center justify-between">
             <h3 className="font-semibold text-text-main">Kritik Stok Uyarıları</h3>
+            <button 
+              onClick={() => loadData(true)}
+              className="text-xs font-semibold text-primary hover:underline flex items-center"
+            >
+              <RefreshCw className={cn("w-3 h-3 mr-1", refreshing && "animate-spin")} /> Yenile
+            </button>
           </div>
-          <div className="p-2 space-y-1">
-             {lowStockProducts.slice(0, 5).map((p) => (
-               <div 
-                 key={p.id} 
-                 onClick={() => onProductClick(p.id)}
-                 className="flex items-center justify-between p-4 hover:bg-bg-main rounded-lg border border-transparent cursor-pointer transition-all group"
-               >
-                 <div className="flex items-center space-x-4">
-                   <div className="w-10 h-10 bg-bg-main rounded-lg flex items-center justify-center overflow-hidden border border-border-color">
-                      {p.cover_image ? (
-                        <img src={p.cover_image} className="w-full h-full object-cover" />
-                      ) : (
-                        <Package className="w-5 h-5 text-text-muted" />
-                      )}
+          <div className="p-2 space-y-1 min-h-[200px]">
+             {error ? (
+                <div className="py-12 text-center text-sm font-semibold text-text-muted">Veri alınamadı</div>
+             ) : (
+               <>
+                 {lowStockProducts.slice(0, 5).map((p: any) => (
+                   <div 
+                     key={p.id} 
+                     onClick={() => onProductClick(p.id)}
+                     className="flex items-center justify-between p-4 hover:bg-bg-main rounded-lg border border-transparent cursor-pointer transition-all group"
+                   >
+                     <div className="flex items-center space-x-4">
+                       <div className="w-10 h-10 bg-bg-main rounded-lg flex items-center justify-center overflow-hidden border border-border-color">
+                          {p.cover_image ? (
+                            <img src={p.cover_image} className="w-full h-full object-cover" />
+                          ) : (
+                            <Package className="w-5 h-5 text-text-muted" />
+                          )}
+                       </div>
+                       <div>
+                         <p className="text-sm font-semibold text-text-main group-hover:text-primary">{p.title}</p>
+                         <p className="text-[10px] text-text-muted font-mono">{p.sku}</p>
+                       </div>
+                     </div>
+                     <div className="text-right">
+                        <p className="text-sm font-bold text-danger">{p.total_stock} Adet</p>
+                        <p className="text-[9px] text-text-muted uppercase font-bold tracking-tight">Acil Sipariş</p>
+                     </div>
                    </div>
-                   <div>
-                     <p className="text-sm font-semibold text-text-main group-hover:text-primary">{p.title}</p>
-                     <p className="text-[10px] text-text-muted font-mono">{p.sku}</p>
+                 ))}
+                 {lowStockProducts.length > 5 && (
+                   <button 
+                     onClick={() => setShowLowStockModal(true)}
+                     className="w-full text-center py-3 text-xs font-bold text-primary hover:bg-bg-main rounded-lg transition-colors border border-dashed border-border-color mt-2"
+                   >
+                     Tüm {lowStockProducts.length} Ürünü Gör
+                   </button>
+                 )}
+                 {lowStockProducts.length === 0 && (
+                   <div className="py-12 text-center">
+                     <Package className="w-10 h-10 text-border-color mx-auto mb-3" />
+                     <p className="text-text-muted text-xs">Tüm stoklar güvenli seviyede.</p>
                    </div>
-                 </div>
-                 <div className="text-right">
-                    <p className="text-sm font-bold text-danger">{p.total_stock} Adet</p>
-                    <p className="text-[9px] text-text-muted uppercase font-bold tracking-tight">Acil Sipariş</p>
-                 </div>
-               </div>
-             ))}
-             {lowStockProducts.length > 5 && (
-               <button 
-                 onClick={() => setShowLowStockModal(true)}
-                 className="w-full text-center py-3 text-xs font-bold text-primary hover:bg-bg-main rounded-lg transition-colors border border-dashed border-border-color mt-2"
-               >
-                 Tüm {lowStockProducts.length} Ürünü Gör
-               </button>
-             )}
-             {lowStockProducts.length === 0 && (
-               <div className="py-12 text-center">
-                 <Package className="w-10 h-10 text-border-color mx-auto mb-3" />
-                 <p className="text-text-muted text-xs">Tüm stoklar güvenli seviyede.</p>
-               </div>
+                 )}
+               </>
              )}
           </div>
         </div>
@@ -289,7 +358,7 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
                </div>
             </div>
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2">
-              {lowStockProducts.map((p) => (
+              {lowStockProducts.map((p: any) => (
                 <div 
                   key={p.id} 
                   onClick={() => {
@@ -333,13 +402,13 @@ export default function Dashboard({ onNavigate, onProductClick }: DashboardProps
   );
 }
 
-function MetricCard({ title, value, icon: Icon, trend, positive, color, bg, onClick }: any) {
+function MetricCard({ title, value, icon: Icon, trend, positive, color, bg, onClick, error }: any) {
   return (
     <div 
       onClick={onClick}
       className={cn(
-        "p-5 rounded-xl bg-white border border-border-color shadow-sm hover:shadow-md transition-all",
-        onClick && "cursor-pointer"
+        "p-5 rounded-xl bg-white border border-border-color shadow-sm transition-all",
+        onClick && "cursor-pointer hover:shadow-md"
       )}
     >
       <div className="flex items-center justify-between mb-4">
@@ -348,13 +417,19 @@ function MetricCard({ title, value, icon: Icon, trend, positive, color, bg, onCl
         </div>
       </div>
       <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-1">{title}</p>
-      <h2 className={cn("text-2xl font-bold tracking-tight", title === 'Kritik Stok' && parseInt(value) > 0 ? 'text-danger' : 'text-text-main')}>{value}</h2>
-      <div className={cn(
-        "mt-2 text-[11px] font-semibold",
-        positive ? "text-success" : (title === 'Kritik Stok' ? 'text-text-muted' : 'text-danger')
-      )}>
-         {trend}
-      </div>
+      {error ? (
+        <h2 className="text-sm font-bold tracking-tight text-text-muted mt-2">Veri alınamadı</h2>
+      ) : (
+        <>
+          <h2 className={cn("text-2xl font-bold tracking-tight", title === 'Kritik Stok' && parseInt(value) > 0 ? 'text-danger' : 'text-text-main')}>{value}</h2>
+          <div className={cn(
+            "mt-2 text-[11px] font-semibold",
+            positive ? "text-success" : (title === 'Kritik Stok' ? 'text-text-muted' : 'text-danger')
+          )}>
+             {trend}
+          </div>
+        </>
+      )}
     </div>
   );
 }

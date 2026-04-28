@@ -216,6 +216,13 @@ db.exec(`
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_unique_name ON api_keys(service_name, display_name) WHERE deleted_at IS NULL;
 
+  CREATE INDEX IF NOT EXISTS idx_transactions_type_date ON transactions(type, date);
+  CREATE INDEX IF NOT EXISTS idx_transactions_platform ON transactions(platform);
+  CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+  CREATE INDEX IF NOT EXISTS idx_recurring_payments_status ON recurring_payments(status);
+  CREATE INDEX IF NOT EXISTS idx_product_platforms_product_id ON product_platforms(product_id);
+  CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON product_images(product_id);
+
   CREATE TABLE IF NOT EXISTS panel_api_keys (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -420,141 +427,93 @@ async function startServer() {
     }
   });
 
-  // Dashboard Metrics
-  app.get("/api/dashboard/metrics", (req, res) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const firstDayOfMonth = `${year}-${month}-01T00:00:00Z`;
+  // Dashboard Summary Endpoint
+  app.get("/api/dashboard-summary", (req, res) => {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
+      const firstDayOfMonth = `${year}-${month}-01T00:00:00Z`;
+      const currentMonthStr = `${year}-${month}`;
 
-    const revenueResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Income' AND date >= ?").get(firstDayOfMonth) as any;
-    const realizedExpensesResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Expense' AND date >= ?").get(firstDayOfMonth) as any;
-    
-    // Calculate pending recurring payments for current month
-    const activeRecurring = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
-    let pendingRecurringTotal = 0;
-    for (const r of activeRecurring) {
-       const recurringId = `${r.id}-${year}-${month}`;
-       const exists = db.prepare("SELECT id FROM transactions WHERE recurring_id = ?").get(recurringId);
-       if (!exists) {
-          pendingRecurringTotal += r.amount;
-       }
-    }
-
-    const totalRevenue = revenueResult?.total || 0;
-    const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
-
-    const lowStockProductsQuery = db.prepare(`
-      SELECT p.*,
-        (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
-        COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
-      FROM products p
-      WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) < CAST((SELECT value FROM settings WHERE key = 'low_stock_threshold') AS INTEGER)
-      AND p.status = 'Active'
-      ORDER BY total_stock ASC
-    `).all() as any[];
-
-    const totalActivitiesResult = db.prepare("SELECT COUNT(*) as count FROM activity_logs").get() as any;
-    
-    // Attempt to calculate total changed values easily
-    const allLogs = db.prepare("SELECT details FROM activity_logs WHERE details IS NOT NULL").all() as any[];
-    let totalChangedValues = 0;
-    for (const log of allLogs) {
-      try {
-        const details = JSON.parse(log.details);
-        if (details && typeof details === 'object') {
-           if (details.before && details.after) {
-             const keys = new Set([...Object.keys(details.before), ...Object.keys(details.after)]);
-             for (const k of keys) {
-                if (k !== 'updated_at' && k !== 'imageChanged' && JSON.stringify(details.before[k]) !== JSON.stringify(details.after[k])) {
-                  totalChangedValues++;
-                }
-             }
-             if (details.after.imageChanged) totalChangedValues++;
-           } else {
-             // For creates / deletes
-             const target = details.after || details.before;
-             if (target) totalChangedValues += Object.keys(target).length;
-             else {
-               const cloned = {...details};
-               delete cloned.before;
-               delete cloned.after;
-               totalChangedValues += Object.keys(cloned).length;
-             }
-           }
-        }
-      } catch(e) {}
-    }
-
-    res.json({
-      totalRevenue,
-      totalExpenses,
-      netProfit: totalRevenue - totalExpenses,
-      lowStockCount: lowStockProductsQuery.length,
-      lowStockProducts: lowStockProductsQuery,
-      totalActivities: totalActivitiesResult?.count || 0,
-      totalChangedValues
-    });
-  });
-
-  // Dashboard Charts
-  app.get("/api/dashboard/charts", (req, res) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const currentMonthStr = `${year}-${month}`;
-
-    // 6 Month History
-    const monthlyDataRaw = db.prepare(`
-      SELECT 
-        strftime('%Y-%m', date) as month,
-        SUM(CASE WHEN type = 'Income' THEN amount ELSE 0 END) as income,
-        SUM(CASE WHEN type = 'Expense' THEN amount ELSE 0 END) as expense
-      FROM transactions 
-      GROUP BY month 
-      ORDER BY month DESC 
-      LIMIT 6
-    `).all() as any[];
-
-    // Check if the current month exists in history, if not add it, or update it
-    let monthlyData = [...monthlyDataRaw];
-    
-    // Calculate pending recurring for current month
-    const activeRecurring = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
-    let pendingRecurringTotal = 0;
-    for (const r of activeRecurring) {
-       const recurringId = `${r.id}-${year}-${month}`;
-       const exists = db.prepare("SELECT id FROM transactions WHERE recurring_id = ?").get(recurringId);
-       if (!exists) {
-          pendingRecurringTotal += r.amount;
-       }
-    }
-
-    let foundCurrent = false;
-    monthlyData = monthlyData.map(d => {
-      if (d.month === currentMonthStr) {
-        foundCurrent = true;
-        return { ...d, expense: d.expense + pendingRecurringTotal };
+      // Metrics
+      const revenueResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Income' AND date >= ?").get(firstDayOfMonth) as any;
+      const realizedExpensesResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'Expense' AND date >= ?").get(firstDayOfMonth) as any;
+      
+      const activeRecurring = db.prepare("SELECT * FROM recurring_payments WHERE status = 'Active'").all() as any[];
+      let pendingRecurringTotal = 0;
+      for (const r of activeRecurring) {
+         const recurringId = `${r.id}-${year}-${month}`;
+         const exists = db.prepare("SELECT id FROM transactions WHERE recurring_id = ?").get(recurringId);
+         if (!exists) pendingRecurringTotal += r.amount;
       }
-      return d;
-    });
 
-    if (!foundCurrent && pendingRecurringTotal > 0) {
-      monthlyData.unshift({ month: currentMonthStr, income: 0, expense: pendingRecurringTotal });
-      if (monthlyData.length > 6) monthlyData.pop();
+      const totalRevenue = revenueResult?.total || 0;
+      const totalExpenses = (realizedExpensesResult?.total || 0) + pendingRecurringTotal;
+
+      const lowStockProductsQuery = db.prepare(`
+        SELECT p.*,
+          (SELECT path FROM product_images WHERE product_id = p.id ORDER BY sort_order ASC LIMIT 1) as cover_image,
+          COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) as total_stock
+        FROM products p
+        WHERE COALESCE((SELECT SUM(stock) FROM product_platforms WHERE product_id = p.id), 0) < CAST((SELECT value FROM settings WHERE key = 'low_stock_threshold') AS INTEGER)
+        AND p.status = 'Active'
+        ORDER BY total_stock ASC
+      `).all() as any[];
+
+      const metrics = {
+        totalRevenue,
+        totalExpenses,
+        netProfit: totalRevenue - totalExpenses,
+        lowStockCount: lowStockProductsQuery.length,
+        lowStockProducts: lowStockProductsQuery
+      };
+
+      // Charts: 6 Month History
+      const monthlyDataRaw = db.prepare(`
+        SELECT 
+          strftime('%Y-%m', date) as month,
+          SUM(CASE WHEN type = 'Income' THEN amount ELSE 0 END) as income,
+          SUM(CASE WHEN type = 'Expense' THEN amount ELSE 0 END) as expense
+        FROM transactions 
+        GROUP BY month 
+        ORDER BY month DESC 
+        LIMIT 6
+      `).all() as any[];
+
+      let monthlyData = [...monthlyDataRaw];
+      let foundCurrent = false;
+      monthlyData = monthlyData.map(d => {
+        if (d.month === currentMonthStr) {
+          foundCurrent = true;
+          return { ...d, expense: d.expense + pendingRecurringTotal };
+        }
+        return d;
+      });
+
+      if (!foundCurrent && pendingRecurringTotal > 0) {
+        monthlyData.unshift({ month: currentMonthStr, income: 0, expense: pendingRecurringTotal });
+        if (monthlyData.length > 6) monthlyData.pop();
+      }
+      monthlyData.reverse();
+
+      // Charts: Platform Revenue
+      const platformRevenue = db.prepare(`
+        SELECT platform, SUM(amount) as total
+        FROM transactions
+        WHERE type = 'Income'
+        GROUP BY platform
+      `).all();
+
+      const charts = { monthlyData, platformRevenue };
+
+      // Recent Transactions
+      const recentTransactions = db.prepare("SELECT * FROM transactions ORDER BY date DESC LIMIT 10").all();
+
+      res.json({ metrics, charts, recentTransactions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
-
-    monthlyData.reverse();
-
-    // Platform Revenue
-    const platformRevenue = db.prepare(`
-      SELECT platform, SUM(amount) as total
-      FROM transactions
-      WHERE type = 'Income'
-      GROUP BY platform
-    `).all();
-
-    res.json({ monthlyData, platformRevenue });
   });
 
   // Products CRUD
