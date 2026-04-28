@@ -172,6 +172,18 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
                     </div>
                  </div>
                </div>
+               
+               <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-text-muted uppercase tracking-widest px-1">Entegrasyon API Anahtarı (n8n)</label>
+                  <input 
+                    type="text" 
+                    value={settings.api_key || ''} 
+                    onChange={e => setSettings({...settings, api_key: e.target.value})}
+                    placeholder="Boş bırakılırsa tüm dış API istekleri reddedilir"
+                    className="form-input font-mono text-sm tracking-tight text-primary"
+                  />
+                  <p className="text-[10px] text-text-muted mt-1 px-1">Dış sistemlerden (Ön: n8n) API ile bağlanırken bu anahtarı <code className="bg-bg-main px-1 rounded">x-api-key</code> veya <code className="bg-bg-main px-1 rounded">Authorization: Bearer</code> olarak kullanın.</p>
+               </div>
             </div>
          </div>
 

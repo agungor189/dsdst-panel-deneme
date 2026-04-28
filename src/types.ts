@@ -69,6 +69,8 @@ export interface DashboardMetrics {
   totalExpenses: number;
   netProfit: number;
   lowStockCount: number;
+  totalActivities?: number;
+  totalChangedValues?: number;
 }
 
 export interface Settings {
@@ -78,6 +80,7 @@ export interface Settings {
   language: string;
   usd_exchange_rate: number;
   default_buffer_percentage: number;
+  api_key?: string;
   commission_rates: Record<string, number>;
   product_categories: string[];
   income_categories: string[];

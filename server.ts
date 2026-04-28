@@ -233,6 +233,7 @@ insertSetting.run("currency_symbol", "₺");
 insertSetting.run("language", "tr");
 insertSetting.run("usd_exchange_rate", "32.5");
 insertSetting.run("default_buffer_percentage", "20");
+insertSetting.run("api_key", uuidv4());
 insertSetting.run("commission_rates", JSON.stringify({
   "Trendyol": 15,
   "Hepsiburada": 15,
@@ -295,6 +296,27 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' })); // Limit JSON body size
   app.use("/uploads", express.static(uploadsDir, { maxAge: '1d' }));
 
+  // API Authentication Middleware
+  app.use("/api", (req, res, next) => {
+    // Let frontend requests bypass the strict api key check for now
+    if (req.headers['x-frontend-request'] === 'true') {
+        return next();
+    }
+
+    const apiKeyHeader = req.headers['x-api-key'] || req.headers['authorization']?.toString().replace('Bearer ', '');
+    const settingsApiKey = db.prepare("SELECT value FROM settings WHERE key='api_key'").get() as any;
+    
+    if (!settingsApiKey || !settingsApiKey.value) {
+        return res.status(403).json({ error: "API Key is not configured in settings. Please generate one from the DSDST Panel UI." });
+    }
+
+    if (apiKeyHeader !== settingsApiKey.value) {
+        return res.status(401).json({ error: "Unauthorized. Invalid API Key." });
+    }
+
+    next();
+  });
+
   // --- API ROUTES ---
 
   // Activity Logs
@@ -341,12 +363,46 @@ async function startServer() {
       ORDER BY total_stock ASC
     `).all() as any[];
 
+    const totalActivitiesResult = db.prepare("SELECT COUNT(*) as count FROM activity_logs").get() as any;
+    
+    // Attempt to calculate total changed values easily
+    const allLogs = db.prepare("SELECT details FROM activity_logs WHERE details IS NOT NULL").all() as any[];
+    let totalChangedValues = 0;
+    for (const log of allLogs) {
+      try {
+        const details = JSON.parse(log.details);
+        if (details && typeof details === 'object') {
+           if (details.before && details.after) {
+             const keys = new Set([...Object.keys(details.before), ...Object.keys(details.after)]);
+             for (const k of keys) {
+                if (k !== 'updated_at' && k !== 'imageChanged' && JSON.stringify(details.before[k]) !== JSON.stringify(details.after[k])) {
+                  totalChangedValues++;
+                }
+             }
+             if (details.after.imageChanged) totalChangedValues++;
+           } else {
+             // For creates / deletes
+             const target = details.after || details.before;
+             if (target) totalChangedValues += Object.keys(target).length;
+             else {
+               const cloned = {...details};
+               delete cloned.before;
+               delete cloned.after;
+               totalChangedValues += Object.keys(cloned).length;
+             }
+           }
+        }
+      } catch(e) {}
+    }
+
     res.json({
       totalRevenue,
       totalExpenses,
       netProfit: totalRevenue - totalExpenses,
       lowStockCount: lowStockProductsQuery.length,
-      lowStockProducts: lowStockProductsQuery
+      lowStockProducts: lowStockProductsQuery,
+      totalActivities: totalActivitiesResult?.count || 0,
+      totalChangedValues
     });
   });
 
@@ -619,14 +675,17 @@ async function startServer() {
       INSERT INTO transactions (id, date, type, category, platform, amount, product_id, note, reference_number)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(txId, date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number);
-    logActivity('CREATE', 'transaction', txId, { type, amount, category });
+    logActivity('CREATE', 'transaction', txId, { 
+      before: {}, 
+      after: { date: date || new Date().toISOString(), type, category, platform, amount, product_id, note, reference_number }
+    });
     res.json({ success: true });
   });
 
   app.delete("/api/transactions/:id", (req, res) => {
     const beforeState = db.prepare("SELECT * FROM transactions WHERE id = ?").get(req.params.id);
     db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'transaction', req.params.id, { before: beforeState });
+    logActivity('DELETE', 'transaction', req.params.id, { before: beforeState, after: {} });
     res.json({ success: true });
   });
 
@@ -643,14 +702,17 @@ async function startServer() {
       INSERT INTO recurring_payments (id, title, day_of_month, amount, category, note)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(recId, title, day_of_month, amount, category, note);
-    logActivity('CREATE', 'recurring_payment', recId, { title, amount });
+    logActivity('CREATE', 'recurring_payment', recId, { 
+      before: {}, 
+      after: { title, day_of_month, amount, category, note } 
+    });
     res.json({ success: true });
   });
 
   app.delete("/api/recurring-payments/:id", (req, res) => {
     const beforeState = db.prepare("SELECT * FROM recurring_payments WHERE id = ?").get(req.params.id);
     db.prepare("DELETE FROM recurring_payments WHERE id = ?").run(req.params.id);
-    logActivity('DELETE', 'recurring_payment', req.params.id, { before: beforeState });
+    logActivity('DELETE', 'recurring_payment', req.params.id, { before: beforeState, after: {} });
     res.json({ success: true });
   });
 

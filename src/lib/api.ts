@@ -9,7 +9,9 @@ const checkAccess = () => {
 
 export const api = {
   get: async (endpoint: string) => {
-    const res = await fetch(`${API_URL}/api${endpoint}`);
+    const res = await fetch(`${API_URL}/api${endpoint}`, {
+      headers: { "X-Frontend-Request": "true" }
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -17,7 +19,10 @@ export const api = {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Frontend-Request": "true"
+      },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -27,7 +32,10 @@ export const api = {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Frontend-Request": "true"
+      },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -37,6 +45,7 @@ export const api = {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "DELETE",
+      headers: { "X-Frontend-Request": "true" }
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -45,6 +54,7 @@ export const api = {
     checkAccess();
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       method: "POST",
+      headers: { "X-Frontend-Request": "true" },
       body: formData,
     });
     if (!res.ok) throw new Error(await res.text());

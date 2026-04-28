@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Package,
+  Activity,
 } from 'lucide-react';
 import { api, formatCurrency } from '../lib/api';
 import { DashboardMetrics, Product } from '../types';

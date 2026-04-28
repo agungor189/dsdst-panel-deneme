@@ -2,6 +2,120 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { Activity, Clock, FileText, X, ArrowRight } from 'lucide-react';
 
+const getActionColor = (action: string) => {
+  switch(action) {
+    case 'CREATE': return 'bg-green-100 text-green-700';
+    case 'UPDATE': return 'bg-blue-100 text-blue-700';
+    case 'DELETE': return 'bg-red-100 text-red-700';
+    case 'DELETE_ALL': return 'bg-red-100 text-red-700';
+    case 'UPDATE_STOCK': return 'bg-orange-100 text-orange-700';
+    default: return 'bg-primary/10 text-primary';
+  }
+};
+
+const getActionText = (action: string) => {
+  switch(action) {
+    case 'CREATE': return 'Eklendi';
+    case 'UPDATE': return 'Düzenlendi';
+    case 'DELETE': return 'Silindi';
+    case 'DELETE_ALL': return 'Tümü Silindi';
+    case 'UPDATE_STOCK': return 'Stok Güncellendi';
+    default: return action;
+  }
+};
+
+const getDiffs = (details: any) => {
+  let diffs: any[] = [];
+  if (!details || typeof details !== 'object' || !details.before || !details.after) {
+    // If it's a CREATE or DELETE with only before or after, count keys
+    if (details && typeof details === 'object') {
+      const targetObj = details.after || details.before;
+      if (targetObj) {
+         return Object.keys(targetObj).map(k => ({ key: k }));
+      }
+      // For fallback
+      const extraDetails = { ...details };
+      delete extraDetails.before;
+      delete extraDetails.after;
+      if (Object.keys(extraDetails).length > 0) {
+        return Object.keys(extraDetails).map(k => ({ key: k }));
+      }
+    }
+    return diffs;
+  }
+  
+  if (details.after.imageChanged) {
+    diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
+  }
+  const beforeObj = details.before || {};
+  const afterObj = details.after || {};
+  const allKeys = new Set([...Object.keys(beforeObj), ...Object.keys(afterObj)]);
+  
+  for (const key of allKeys) {
+    const bStr = JSON.stringify(beforeObj[key]);
+    const aStr = JSON.stringify(afterObj[key]);
+    if (bStr !== aStr && key !== 'updated_at' && key !== 'imageChanged') {
+      if (key === 'platforms' && Array.isArray(beforeObj[key]) && Array.isArray(afterObj[key])) {
+        const oldP = beforeObj[key];
+        const newP = afterObj[key];
+        
+        const stockChangedAny = newP.some((nP: any) => {
+           const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+           return !oP || oP.stock !== nP.stock;
+        });
+        
+        if (stockChangedAny && newP.length > 0) {
+           const oldStock = oldP.length > 0 ? oldP[0].stock : 0;
+           diffs.push({ key: 'Stok', old: oldStock, new: newP[0].stock });
+        }
+        
+        const isPriceSameOld = oldP.length > 0 && oldP.every((p: any) => p.price === oldP[0]?.price);
+        const isPriceSameNew = newP.length > 0 && newP.every((p: any) => p.price === newP[0]?.price);
+        const priceChangedAny = newP.some((nP: any) => {
+           const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+           return !oP || oP.price !== nP.price;
+        });
+        
+        if (isPriceSameNew && priceChangedAny) {
+           diffs.push({ key: 'Tüm Platformlar Fiyat', old: isPriceSameOld ? oldP[0]?.price : '(Farklı Değerler)', new: newP[0]?.price });
+        }
+        
+        const isListedSameOld = oldP.length > 0 && oldP.every((p: any) => p.is_listed === oldP[0]?.is_listed);
+        const isListedSameNew = newP.length > 0 && newP.every((p: any) => p.is_listed === newP[0]?.is_listed);
+        const listedChangedAny = newP.some((nP: any) => {
+           const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+           return !oP || oP.is_listed !== nP.is_listed;
+        });
+        
+        if (isListedSameNew && listedChangedAny) {
+           diffs.push({ key: 'Tüm Platformlar Durumu', old: isListedSameOld ? (oldP[0]?.is_listed ? 'Yayında' : 'Yayında Değil') : '(Farklı Değerler)', new: newP[0]?.is_listed ? 'Yayında' : 'Yayında Değil' });
+        }
+        
+        newP.forEach((nP: any) => {
+          const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
+          if (oP) {
+            if (!(isPriceSameNew && priceChangedAny) && oP.price !== nP.price) {
+              diffs.push({ key: `${nP.platform_name} Fiyat`, old: oP.price, new: nP.price });
+            }
+            if (!(isListedSameNew && listedChangedAny) && oP.is_listed !== nP.is_listed) {
+              diffs.push({ key: `${nP.platform_name} Durum`, old: oP.is_listed ? 'Yayında' : 'Yayında Değil', new: nP.is_listed ? 'Yayında' : 'Yayında Değil' });
+            }
+          }
+        });
+      } else if (key === 'images' && Array.isArray(beforeObj[key]) && Array.isArray(afterObj[key])) {
+        const oldPaths = beforeObj[key].map((img: any) => img.path).join(', ');
+        const newPaths = afterObj[key].map((img: any) => img.path).join(', ');
+        if (oldPaths !== newPaths) {
+          diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
+        }
+      } else {
+        diffs.push({ key, old: beforeObj[key], new: afterObj[key] });
+      }
+    }
+  }
+  return diffs;
+};
+
 const LogDetails = ({ detailsStr }: { detailsStr: string }) => {
   const [expanded, setExpanded] = useState(false);
   
@@ -19,77 +133,7 @@ const LogDetails = ({ detailsStr }: { detailsStr: string }) => {
   }
 
   // Calculate deep diff if before and after exist
-  let diffs: any[] = [];
-  if (details.before && details.after) {
-    if (details.after.imageChanged) {
-      diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
-    }
-    const allKeys = new Set([...Object.keys(details.before), ...Object.keys(details.after)]);
-    for (const key of allKeys) {
-      // Ignore updated_at auto updates if they are the only thing causing noise, but safe to show.
-      // We do a simple stringify comparison to support nested objects optionally
-      const bStr = JSON.stringify(details.before[key]);
-      const aStr = JSON.stringify(details.after[key]);
-      if (bStr !== aStr && key !== 'updated_at' && key !== 'imageChanged') {
-        if (key === 'platforms' && Array.isArray(details.before[key]) && Array.isArray(details.after[key])) {
-          const oldP = details.before[key];
-          const newP = details.after[key];
-          
-          const stockChangedAny = newP.some((nP: any) => {
-             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
-             return !oP || oP.stock !== nP.stock;
-          });
-          
-          if (stockChangedAny && newP.length > 0) {
-             const oldStock = oldP.length > 0 ? oldP[0].stock : 0;
-             diffs.push({ key: 'Stok', old: oldStock, new: newP[0].stock });
-          }
-          
-          const isPriceSameOld = oldP.length > 0 && oldP.every((p: any) => p.price === oldP[0]?.price);
-          const isPriceSameNew = newP.length > 0 && newP.every((p: any) => p.price === newP[0]?.price);
-          const priceChangedAny = newP.some((nP: any) => {
-             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
-             return !oP || oP.price !== nP.price;
-          });
-          
-          if (isPriceSameNew && priceChangedAny) {
-             diffs.push({ key: 'Tüm Platformlar Fiyat', old: isPriceSameOld ? oldP[0]?.price : '(Farklı Değerler)', new: newP[0]?.price });
-          }
-          
-          const isListedSameOld = oldP.length > 0 && oldP.every((p: any) => p.is_listed === oldP[0]?.is_listed);
-          const isListedSameNew = newP.length > 0 && newP.every((p: any) => p.is_listed === newP[0]?.is_listed);
-          const listedChangedAny = newP.some((nP: any) => {
-             const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
-             return !oP || oP.is_listed !== nP.is_listed;
-          });
-          
-          if (isListedSameNew && listedChangedAny) {
-             diffs.push({ key: 'Tüm Platformlar Durumu', old: isListedSameOld ? (oldP[0]?.is_listed ? 'Yayında' : 'Yayında Değil') : '(Farklı Değerler)', new: newP[0]?.is_listed ? 'Yayında' : 'Yayında Değil' });
-          }
-          
-          newP.forEach((nP: any) => {
-            const oP = oldP.find((p: any) => p.platform_name === nP.platform_name);
-            if (oP) {
-              if (!(isPriceSameNew && priceChangedAny) && oP.price !== nP.price) {
-                diffs.push({ key: `${nP.platform_name} Fiyat`, old: oP.price, new: nP.price });
-              }
-              if (!(isListedSameNew && listedChangedAny) && oP.is_listed !== nP.is_listed) {
-                diffs.push({ key: `${nP.platform_name} Durum`, old: oP.is_listed ? 'Yayında' : 'Yayında Değil', new: nP.is_listed ? 'Yayında' : 'Yayında Değil' });
-              }
-            }
-          });
-        } else if (key === 'images' && Array.isArray(details.before[key]) && Array.isArray(details.after[key])) {
-          const oldPaths = details.before[key].map((img: any) => img.path).join(', ');
-          const newPaths = details.after[key].map((img: any) => img.path).join(', ');
-          if (oldPaths !== newPaths) {
-            diffs.push({ key: 'Görseller', isSpecialToken: 'image_update' });
-          }
-        } else {
-          diffs.push({ key, old: details.before[key], new: details.after[key] });
-        }
-      }
-    }
-  }
+  const diffs = getDiffs(details);
 
   const renderSection = (title: string, obj: any) => (
      <div className="mt-4 bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm">
@@ -107,7 +151,9 @@ const LogDetails = ({ detailsStr }: { detailsStr: string }) => {
         className="flex items-center text-xs w-full text-left text-primary font-bold hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all"
       >
         <FileText className="w-4 h-4 mr-1.5 flex-shrink-0" />
-        <span className="truncate">Detayları Göster</span>
+        <span className="truncate">
+          Detayları Göster
+        </span>
       </button>
       
       {expanded && (
@@ -263,31 +309,63 @@ export default function ActivityLogs() {
                   <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">Tarih</th>
                   <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">İşlem</th>
                   <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">Tür</th>
+                  <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">Değişiklik</th>
                   <th className="pb-4 pt-2 px-4 font-black text-xs text-text-muted uppercase tracking-wider">Detaylar</th>
                 </tr>
               </thead>
               <tbody className="text-sm font-medium">
-                {logs.map((log: any) => (
-                  <tr key={log.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                    <td className="py-4 px-4 text-text-muted whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <Clock className="w-3 h-3" />
-                        <span>{new Date(log.created_at).toLocaleString('tr-TR')}</span>
-                      </div>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
-                        {log.action}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4 font-bold text-text-main uppercase text-xs">
-                      {log.entity_type}
-                    </td>
-                    <td className="py-4 px-4 text-text-main align-top max-w-sm">
-                      <LogDetails detailsStr={log.details} />
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  let currentDate = '';
+                  return logs.map((log: any) => {
+                    let parsed = null;
+                    try {
+                      parsed = JSON.parse(log.details);
+                    } catch(e) {}
+                    const dCount = parsed ? getDiffs(parsed).length : 0;
+                    
+                    const logDate = new Date(log.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+                    const isNewDate = logDate !== currentDate;
+                    if (isNewDate) {
+                      currentDate = logDate;
+                    }
+                    
+                    return (
+                      <React.Fragment key={log.id}>
+                        {isNewDate && (
+                          <tr className="bg-gray-100/50">
+                            <td colSpan={5} className="py-2 px-4 font-bold text-gray-600 text-xs text-center border-y border-gray-200">
+                              {logDate}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                          <td className="py-4 px-4 text-text-muted whitespace-nowrap">
+                            <div className="flex items-center space-x-2">
+                              <Clock className="w-3 h-3" />
+                              <span>{new Date(log.created_at).toLocaleTimeString('tr-TR')}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${getActionColor(log.action)}`}>
+                              {getActionText(log.action)}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 font-bold text-text-main uppercase text-xs">
+                            {log.entity_type}
+                          </td>
+                          <td className="py-4 px-4 font-bold text-text-main uppercase text-xs">
+                            {dCount > 0 ? (
+                              <span className="bg-primary/10 text-primary px-2 py-1 rounded-md">{dCount}</span>
+                            ) : '-'}
+                          </td>
+                          <td className="py-4 px-4 text-text-main align-top max-w-sm">
+                            <LogDetails detailsStr={log.details} />
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
