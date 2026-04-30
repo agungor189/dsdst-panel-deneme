@@ -12,12 +12,18 @@ export default function PricingSettingsModal({
   onRefresh: () => void,
   products: any[] 
 }) {
-  const { FormatAmount, activeRate, refreshRate: fetchRateFromApi } = useCurrency();
-  const [exchangeRate, setExchangeRate] = useState<number>(activeRate);
+  const { FormatAmount, activeRate } = useCurrency();
+  const [exchangeRate, setExchangeRate] = useState<number>(activeRate || 0);
   const [bufferPercentage, setBufferPercentage] = useState<number>(20);
   const [profitPercentage, setProfitPercentage] = useState<number>(50);
   const [includeLocked, setIncludeLocked] = useState<boolean>(false);
-  
+
+  useEffect(() => {
+    if (activeRate > 0 && exchangeRate === 0) {
+      setExchangeRate(activeRate);
+    }
+  }, [activeRate]);
+
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -26,11 +32,14 @@ export default function PricingSettingsModal({
 
   // Initial calculation logic
   const calculatePricing = (product: any) => {
-    const purchaseUSD = product.purchase_price_usd || 0;
-    const purchaseTRY = purchaseUSD * exchangeRate;
-    const bufferedCostTRY = purchaseTRY * (1 + bufferPercentage / 100);
-    const calculatedSalePriceTRY = bufferedCostTRY * (1 + profitPercentage / 100);
-    return calculatedSalePriceTRY;
+    const purchaseUSD = parseFloat(product.purchase_price_usd) || 0;
+    const rate = exchangeRate || 0;
+    const buffer = bufferPercentage || 0;
+    const profit = profitPercentage || 0;
+    const purchaseTRY = purchaseUSD * rate;
+    const bufferedCostTRY = purchaseTRY * (1 + buffer / 100);
+    const calculatedSalePriceTRY = bufferedCostTRY * (1 + profit / 100);
+    return Math.ceil(calculatedSalePriceTRY);
   };
 
   const handlePreview = () => {
@@ -76,12 +85,11 @@ export default function PricingSettingsModal({
           profitPercentage
         }
       });
-      // Optionally we could show a success message before closing, but closing is fine too.
       onRefresh();
       onClose();
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.response?.data?.error || "Fiyatlar güncellenirken hata oluştu.");
+      setErrorMessage(err.message || "Fiyatlar güncellenirken hata oluştu.");
       setConfirmUpdate(null);
     } finally {
       setSaving(false);
