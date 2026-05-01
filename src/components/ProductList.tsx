@@ -22,7 +22,9 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import PricingSettingsModal from './PricingSettingsModal';
-import { Calculator } from 'lucide-react';
+import { Calculator, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { AdvancedImportProgress } from './AdvancedImportProgress';
+import toast from 'react-hot-toast';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -74,6 +76,8 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [csvData, setCsvData] = useState<any[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [importProgress, setImportProgress] = useState<{current: number, total: number} | null>(null);
+
   const [mapping, setMapping] = useState<Record<string, string>>({
     sku: 'Ürün Kodu',
     name: 'Ürün Adı',
@@ -156,18 +160,21 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
     let errorCount = 0;
 
     setDeletingAll(true); // Reuse loading state
+    setShowMappingModal(false);
+    setImportProgress({ current: 0, total: csvData.length });
 
-    for (const row of csvData) {
+    for (let i = 0; i < csvData.length; i++) {
+      const row = csvData[i];
       try {
         const sku = row[mapping.sku] || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const name = row[mapping.name] || 'İsimsiz Ürün';
         const category = row[mapping.category] || 'Genel';
         const totalStock = parseInt(row[mapping.stock]) || 0;
+        
         const parseCSVPrice = (val: any) => {
           if (!val) return 0;
-          let s = String(val).replace(/[^0-9.,-]/g, ''); // remove currencies, spaces
-          s = s.replace(',', '.'); // handle comma decimals
-          // However, if there are multiple dots (like 1.000.45) we need better parsing, but basic comma-to-dot works for most cases
+          let s = String(val).replace(/[^0-9.,-]/g, ''); 
+          s = s.replace(',', '.'); 
           const lastDot = s.lastIndexOf('.');
           if (lastDot !== -1) {
              const before = s.slice(0, lastDot).replace(/\./g, '');
@@ -215,15 +222,21 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
         console.error('Import error for row:', row, err);
         errorCount++;
       }
+      setImportProgress({ current: i + 1, total: csvData.length });
     }
 
     setDeletingAll(false);
-    setShowMappingModal(false);
+    setImportProgress(null);
     
     if (successCount > 0) {
       setTimeout(() => {
         setShowPricingModal(true);
       }, 500);
+      toast.success(`${successCount} ürün başarıyla eklendi`);
+    }
+    
+    if (errorCount > 0) {
+      toast.error(`${errorCount} ürün eklenirken hata oluştu`);
     }
     
     loadProducts();
@@ -253,6 +266,30 @@ export default function ProductList({ onAddProduct, onProductClick }: ProductLis
 
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+      {importProgress && (
+         <div className="fixed inset-0 bg-[#0F172A]/40 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-8 flex flex-col items-center shadow-2xl max-w-sm w-full mx-auto">
+               <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-6" />
+               <h3 className="text-xl font-black text-gray-900 tracking-tight mb-2">İçe Aktarılıyor</h3>
+               <p className="text-gray-500 text-sm font-medium mb-6 text-center">
+                 Lütfen bekleyin, ürünler sisteme aktarılıyor...
+               </p>
+               <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden mb-3 text-center relative">
+                  <div 
+                    className="h-full bg-blue-600 rounded-full transition-all duration-300 relative overflow-hidden"
+                    style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+                  >
+                     <div className="absolute inset-0 bg-white/20 w-full h-full animate-[shimmer_1s_infinite] -skew-x-12" />
+                  </div>
+               </div>
+               <div className="flex w-full justify-between items-center px-1">
+                 <span className="text-xs text-blue-700 font-bold bg-blue-50 px-2 py-1 rounded-full border border-blue-100 shadow-sm">{importProgress.current} / {importProgress.total} satır</span>
+                 <span className="text-sm font-black text-gray-900 tracking-tight">{Math.round((importProgress.current / importProgress.total) * 100)}%</span>
+               </div>
+            </div>
+         </div>
+      )}
+
       {showPricingModal && (
         <PricingSettingsModal 
           onClose={() => setShowPricingModal(false)}

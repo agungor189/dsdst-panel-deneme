@@ -1016,6 +1016,8 @@ async function startServer() {
     res.json({ ...product, images, platforms });
   });
 
+
+
   app.post("/api/products", (req, res) => {
     const id = uuidv4();
     const { 
