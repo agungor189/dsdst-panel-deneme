@@ -19,6 +19,7 @@ import { createProductAnalyticsRouter } from "./server/routes/productAnalyticsRo
 import { createRecurringPaymentsRouter } from "./server/routes/recurringPaymentsRoutes.js";
 import { createDashboardDataRouter } from "./server/routes/dashboardDataRoutes.js";
 import { generateNormalizedFields } from "./server/utils/normalizeProductFields.js";
+import { runMigrations } from "./server/migrations/runner.js";
 
 declare global {
   namespace Express {
@@ -44,6 +45,10 @@ if (!process.env.ENCRYPTION_SECRET) {
 
 if (!process.env.PANEL_API_HASH_SECRET) {
   throw new Error("PANEL_API_HASH_SECRET is required. Lütfen .env dosyanıza ekleyin!");
+}
+
+if (!process.env.JWT_SECRET) {
+  throw new Error("JWT_SECRET is required. Lütfen .env dosyanıza ekleyin! (min 32 karakter önerilir)");
 }
 
 const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET.padEnd(32, '0').slice(0, 32);
@@ -87,10 +92,13 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// Database initialization
-let db = new Database("dsdst_panel.db");
+// Database initialization — path is configurable via DB_PATH env var.
+// Docker volumes: set DB_PATH=/data/dsdst_panel.db and mount /data as a volume.
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), "dsdst_panel.db");
+let db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+db.pragma("busy_timeout = 5000"); // wait up to 5s on locked DB instead of immediately throwing
 
 // Schema setup
 db.exec(`
@@ -645,6 +653,10 @@ insertSetting.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dok
 insertSetting.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
 insertSetting.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
 
+// Run versioned migrations after base schema is established.
+// This is the single source of truth for incremental schema changes.
+runMigrations(db);
+
 // Multer setup for image uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -683,7 +695,8 @@ const expenseUpload = multer({
     }
   }
 });
-const backupUpload = multer({ dest: os.tmpdir() });
+// 500 MB max backup restore size — prevents disk exhaustion from malicious / corrupt uploads.
+const backupUpload = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024 } });
 
 export const AppLogger = {
   info: (category: string, message: string, data?: any) => {
@@ -697,12 +710,12 @@ export const AppLogger = {
   }
 };
 
-function logActivity(action: string, entity_type: string, entity_id: string, details?: any) {
+function logActivity(action: string, entity_type: string, entity_id: string, details?: any, userId?: string) {
   try {
     db.prepare(`
-      INSERT INTO activity_logs (id, action, entity_type, entity_id, details)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(uuidv4(), action, entity_type, entity_id, details ? JSON.stringify(details) : null);
+      INSERT INTO activity_logs (id, action, entity_type, entity_id, details, user_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(uuidv4(), action, entity_type, entity_id, details ? JSON.stringify(details) : null, userId ?? null);
   } catch (err) {
     AppLogger.error('DATABASE_ERROR', 'Activity logging failed', err);
   }
@@ -811,14 +824,29 @@ async function startServer() {
   });
   app.use(limiter);
 
-  app.use(cors({ 
-    origin: true,
-    credentials: true
+  // CORS: allow specific origins via ALLOWED_ORIGINS env var (comma-separated).
+  // Leaving ALLOWED_ORIGINS unset permits all origins (useful for local dev behind a tunnel).
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [];
+
+  app.use(cors({
+    origin: allowedOrigins.length > 0
+      ? (origin, callback) => {
+          if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+          } else {
+            callback(new Error(`CORS: origin '${origin}' not allowed`));
+          }
+        }
+      : true,
+    credentials: true,
   }));
   app.use(express.json({ limit: '10mb' })); // Limit JSON body size
   app.use("/uploads", express.static(uploadsDir, { maxAge: '1d' }));
 
-  const JWT_SECRET = process.env.JWT_SECRET || 'dsdst_secret_jwt_key_fallback';
+  // JWT_SECRET validated at startup — no fallback allowed.
+  const JWT_SECRET = process.env.JWT_SECRET!;
 
   const authRouter = express.Router();
   authRouter.post('/login', (req, res) => {
@@ -884,12 +912,53 @@ async function startServer() {
     return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Unauthorized access.' } });
   });
 
+  // Server-side write protection: readonly users cannot call mutating methods.
+  // This enforces access control on the server, not just the client.
+  app.use("/api", (req, res, next) => {
+    if (req.path.startsWith('/auth/') || req.path.startsWith('/public/')) return next();
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+
+    const user = (req as any).user;
+    if (user?.role === 'readonly') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Salt okunur hesap — bu işlem için yetkiniz yok.' },
+      });
+    }
+    next();
+  });
+
+  // Helper middleware — admin-only routes (backup, restore, user management, settings).
+  const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = (req as any).user;
+    if (!user || user.role !== 'admin') {
+      logActivity('FORBIDDEN_ACCESS', 'system', req.path, { method: req.method, ip: req.ip }, user?.id);
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Bu işlem için admin yetkisi gereklidir.' },
+      });
+    }
+    next();
+  };
+
   // --- API ROUTES ---
 
   // Activity Logs
   app.get("/api/activity-logs", (req, res) => {
     try {
-      const logs = db.prepare("SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100").all();
+      const limit = Math.min(Number(req.query.limit) || 200, 1000);
+      const offset = Number(req.query.offset) || 0;
+      const { entity_type, action, user_id } = req.query;
+
+      let sql = "SELECT * FROM activity_logs WHERE 1=1";
+      const params: any[] = [];
+      if (entity_type) { sql += " AND entity_type = ?"; params.push(entity_type); }
+      if (action)      { sql += " AND action = ?";      params.push(action); }
+      if (user_id)     { sql += " AND user_id = ?";     params.push(user_id); }
+      sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+      params.push(limit, offset);
+
+      const logs = db.prepare(sql).all(...params);
       res.json(logs);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2213,23 +2282,89 @@ async function startServer() {
 
   app.put("/api/sales/:id", (req, res) => {
     try {
-      const { 
-        customer_name, customer_phone, customer_address, 
-        shipping_company, tracking_number, status
+      const {
+        customer_name, customer_phone, customer_address,
+        shipping_company, tracking_number, status, return_reason,
       } = req.body;
-      
-      db.prepare(`
-        UPDATE sales SET 
-          customer_name=?, customer_phone=?, customer_address=?, 
-          shipping_company=?, tracking_number=?, status=?, updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).run(
-        customer_name, customer_phone, customer_address, 
-        shipping_company, tracking_number, status, req.params.id
-      );
-      res.json({ success: true, message: "Satış güncellendi" });
+
+      const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id) as any;
+      if (!sale) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Satış bulunamadı.' } });
+
+      const FINAL_STATUSES = ['İptal Edildi', 'İade Edildi'];
+      if (FINAL_STATUSES.includes(sale.status)) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_STATE', message: `Durumu '${sale.status}' olan satış artık değiştirilemez.` },
+        });
+      }
+
+      db.transaction(() => {
+        const isBecomingCancelled = status === 'İptal Edildi' && !FINAL_STATUSES.includes(sale.status);
+        const isBecomingReturned  = status === 'İade Edildi'  && !FINAL_STATUSES.includes(sale.status);
+
+        if (isBecomingCancelled || isBecomingReturned) {
+          // Reverse stock: add back the sold quantities
+          const saleItems = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(req.params.id) as any[];
+          for (const item of saleItems) {
+            const platforms = db.prepare(
+              "SELECT * FROM product_platforms WHERE product_id = ? ORDER BY stock DESC"
+            ).all(item.product_id) as any[];
+
+            if (platforms.length > 0) {
+              // Return stock to the first platform (highest stock) as a simple heuristic
+              db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE id = ?")
+                .run(item.quantity, platforms[0].id);
+              db.prepare(
+                "INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)"
+              ).run(uuidv4(), item.product_id, platforms[0].platform_name, item.quantity,
+                `${status} — Satış No: ${req.params.id}`, 'IN');
+            }
+          }
+
+          // Soft-delete the linked income transaction (mark as deleted / reversed)
+          if (sale.income_transaction_id) {
+            db.prepare("UPDATE transactions SET is_deleted = 1, note = note || ' [İptal/İade]' WHERE id = ?")
+              .run(sale.income_transaction_id);
+          }
+
+          // Reverse cash transaction
+          if (sale.cash_account_id) {
+            db.prepare(`
+              INSERT INTO cash_transactions (id, account_id, type, amount, currency,
+                exchange_rate_at_transaction, source_type, source_id, description)
+              VALUES (?, ?, 'OUT', ?, 'TRY', 1, 'sale_reversal', ?, ?)
+            `).run(uuidv4(), sale.cash_account_id, sale.net_total ?? sale.total_amount,
+              req.params.id, `${status}: Satış No ${req.params.id}`);
+          }
+
+          logActivity(isBecomingCancelled ? 'SALE_CANCELLED' : 'SALE_RETURNED', 'sale', req.params.id,
+            { reason: return_reason, previous_status: sale.status }, (req as any).user?.id);
+        }
+
+        db.prepare(`
+          UPDATE sales SET
+            customer_name=?, customer_phone=?, customer_address=?,
+            shipping_company=?, tracking_number=?, status=?,
+            return_reason=?, returned_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE returned_at END,
+            updated_at=CURRENT_TIMESTAMP
+          WHERE id=?
+        `).run(
+          customer_name ?? sale.customer_name,
+          customer_phone ?? sale.customer_phone,
+          customer_address ?? sale.customer_address,
+          shipping_company ?? sale.shipping_company,
+          tracking_number ?? sale.tracking_number,
+          status ?? sale.status,
+          return_reason ?? sale.return_reason,
+          isBecomingCancelled || isBecomingReturned ? 1 : 0,
+          req.params.id,
+        );
+      })();
+
+      res.json({ success: true, message: "Satış güncellendi." });
     } catch (err: any) {
-      res.status(400).json({ error: err.message });
+      AppLogger.error('SALE_UPDATE_ERROR', 'Sale update failed', err);
+      res.status(400).json({ success: false, error: { code: 'UPDATE_FAILED', message: err.message } });
     }
   });
 
@@ -2357,24 +2492,35 @@ async function startServer() {
           let remainingToDeduct = item.quantity;
           const platforms = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? AND stock > 0 ORDER BY stock DESC").all(item.product_id) as any[];
 
-          for (const plat of platforms) {
+          for (const platRow of platforms) {
             if (remainingToDeduct <= 0) break;
-            const deduct = Math.min(plat.stock, remainingToDeduct);
-            db.prepare("UPDATE product_platforms SET stock = stock - ? WHERE id = ?").run(deduct, plat.id);
-            
-            try {
-              db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)")
-                .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan düşüldü (No: ${id})`, 'OUT');
-            } catch(e) {
-              // fallback if type column hasn't migrated
-              db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason) VALUES (?, ?, ?, ?, ?)")
-                .run(uuidv4(), item.product_id, plat.platform_name, -deduct, `satıştan otomatik düşüldü (Satış no: ${id})`);
-            }
-            
+            const deduct = Math.min(platRow.stock, remainingToDeduct);
+            db.prepare("UPDATE product_platforms SET stock = stock - ? WHERE id = ?").run(deduct, platRow.id);
+            db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(uuidv4(), item.product_id, platRow.platform_name, -deduct, `Satış No: ${id}`, 'OUT');
             remainingToDeduct -= deduct;
           }
         }
-        
+
+        // 4. Auto-create income transaction so the financial ledger is always consistent.
+        const incTxnId = uuidv4();
+        db.prepare(`
+          INSERT INTO transactions (id, date, type, category, platform, amount, amount_try, currency,
+            exchange_rate_at_transaction, note, reference_number, cash_account_id, created_at)
+          VALUES (?, CURRENT_TIMESTAMP, 'Income', 'Satış', ?, ?, ?, 'TRY', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `).run(
+          incTxnId, plat, netTotal, netTotal, activeRate,
+          `${customer_name || 'Müşteri'} — ${plat} satışı`,
+          id, finalCashAccountId
+        );
+
+        // Update the sale with the linked income transaction id
+        db.prepare("UPDATE sales SET income_transaction_id = ? WHERE id = ?").run(incTxnId, id);
+
+        logActivity('SALE_CREATED', 'sale', id, {
+          customer: customer_name, platform: plat, total: total_amount, net_profit: netProfit,
+        }, (req as any).user?.id);
+
       })();
 
       res.json({ success: true, message: "Satış başarıyla kaydedildi.", id });
@@ -2918,28 +3064,36 @@ async function startServer() {
   });
 
   // --- DATABASE BACKUP / RESTORE ---
-  app.get("/api/backup/download", async (req, res) => {
+  // Both endpoints are admin-only — a backup contains the entire DB including credentials.
+  app.get("/api/backup/download", requireAdmin, async (req, res) => {
+    const ts = Date.now();
+    // Write temp files to OS temp dir, not process.cwd(), to avoid polluting the project dir.
+    const backupPath = path.join(os.tmpdir(), `dsdst_backup_${ts}.sqlite`);
+    const zipPath    = path.join(os.tmpdir(), `dsdst_backup_${ts}.zip`);
     try {
-      const backupPath = path.join(process.cwd(), `dsdst_backup_${Date.now()}.sqlite`);
       await db.backup(backupPath);
-      
+
       const zip = new AdmZip();
       zip.addLocalFile(backupPath, "", "dsdst_panel.db");
-      
+
       const uploadsDir = path.join(process.cwd(), "uploads");
       if (fs.existsSync(uploadsDir)) {
-         zip.addLocalFolder(uploadsDir, "uploads");
+        zip.addLocalFolder(uploadsDir, "uploads");
       }
-      
-      const zipPath = path.join(process.cwd(), `kofem_backup_${Date.now()}.zip`);
+
       zip.writeZip(zipPath);
 
-      res.download(zipPath, `kofem_backup_${new Date().toISOString().split('T')[0]}.zip`, (err) => {
-        try { fs.unlinkSync(backupPath); } catch(e) {}
-        try { fs.unlinkSync(zipPath); } catch(e) {}
+      logActivity("BACKUP_DOWNLOADED", "system", "backup", { ip: req.ip }, (req as any).user?.id);
+
+      res.download(zipPath, `dsdst_backup_${new Date().toISOString().split('T')[0]}.zip`, () => {
+        try { fs.unlinkSync(backupPath); } catch (_) {}
+        try { fs.unlinkSync(zipPath); }    catch (_) {}
       });
     } catch (err: any) {
-      res.status(500).json({ error: "Backup failed: " + err.message });
+      try { fs.unlinkSync(backupPath); } catch (_) {}
+      try { fs.unlinkSync(zipPath); }    catch (_) {}
+      AppLogger.error('BACKUP_ERROR', 'Backup download failed', err);
+      res.status(500).json({ success: false, error: { code: 'BACKUP_FAILED', message: err.message } });
     }
   });
 
@@ -3045,63 +3199,91 @@ async function startServer() {
     }
   });
 
-  app.post("/api/backup/restore", backupUpload.single("zipfile"), (req, res) => {
+  // Restore is admin-only and uses a mutex flag to prevent concurrent access during the swap.
+  let isRestoring = false;
+
+  app.post("/api/backup/restore", requireAdmin, backupUpload.single("zipfile"), (req, res) => {
+    if (isRestoring) {
+      return res.status(503).json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Restore işlemi zaten devam ediyor.' } });
+    }
+
+    const uploadedPath = req.file?.path;
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
-      
-      const newPath = req.file.path;
-      
-      const zip = new AdmZip(newPath);
-      const zipEntries = zip.getEntries();
-      
-      const dbEntry = zipEntries.find(e => e.entryName === "dsdst_panel.db");
-      if (!dbEntry) {
-         try { fs.unlinkSync(newPath); } catch(e) {}
-         return res.status(400).json({ error: "Geçersiz yedek dosyası: dsdst_panel.db bulunamadı" });
+      if (!uploadedPath) {
+        return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'Yedek dosyası yüklenmedi.' } });
       }
 
-      // Close the current DB
+      const zip = new AdmZip(uploadedPath);
+      const zipEntries = zip.getEntries();
+
+      const dbEntry = zipEntries.find((e) => e.entryName === "dsdst_panel.db");
+      if (!dbEntry) {
+        try { fs.unlinkSync(uploadedPath); } catch (_) {}
+        return res.status(400).json({ success: false, error: { code: 'INVALID_BACKUP', message: 'Geçersiz yedek: dsdst_panel.db bulunamadı.' } });
+      }
+
+      isRestoring = true;
+
+      // Write the restored DB to a temp location first for validation, then move it into place.
+      const restoredDbPath = path.join(os.tmpdir(), `dsdst_restore_${Date.now()}.db`);
+      fs.writeFileSync(restoredDbPath, dbEntry.getData());
+
+      // Validate the restored DB is a valid SQLite file before swapping.
+      let testDb: Database.Database | null = null;
+      try {
+        testDb = new Database(restoredDbPath, { readonly: true });
+        testDb.pragma("integrity_check");
+      } finally {
+        testDb?.close();
+      }
+
+      // Swap: close current DB, replace file, reopen.
       db.close();
 
-      // Delete the old DB files completely before extraction to ensure no inode conflicts
-      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db")); } catch(e) {}
-      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db-wal")); } catch(e) {}
-      try { fs.unlinkSync(path.join(process.cwd(), "dsdst_panel.db-shm")); } catch(e) {}
+      try { fs.unlinkSync(`${DB_PATH}-wal`); } catch (_) {}
+      try { fs.unlinkSync(`${DB_PATH}-shm`); } catch (_) {}
+      fs.copyFileSync(restoredDbPath, DB_PATH);
+      try { fs.unlinkSync(restoredDbPath); } catch (_) {}
 
-      // Extract all contents (overwrite existing)
-      zip.extractAllTo(process.cwd(), true);
+      // Restore /uploads from the zip if present
+      const uploadsDest = path.join(process.cwd(), "uploads");
+      for (const entry of zipEntries) {
+        if (entry.entryName.startsWith("uploads/") && !entry.isDirectory) {
+          const destPath = path.join(process.cwd(), entry.entryName);
+          fs.mkdirSync(path.dirname(destPath), { recursive: true });
+          fs.writeFileSync(destPath, entry.getData());
+        }
+      }
 
-      // Attempt cleanup of the uploaded temp file
-      try { fs.unlinkSync(newPath); } catch(e) {}
-
-      // Re-instantiate the database
-      db = new Database("dsdst_panel.db");
+      db = new Database(DB_PATH);
       db.pragma("journal_mode = WAL");
       db.pragma("foreign_keys = ON");
-      
-      // Ensure missing default settings are populated from older backups (e.g., product_categories)
-      const postRestoreInsertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
-      postRestoreInsertSetting.run("company_name", "DSDST Panel");
-      postRestoreInsertSetting.run("low_stock_threshold", "50");
-      postRestoreInsertSetting.run("currency_symbol", "₺");
-      postRestoreInsertSetting.run("language", "tr");
-      postRestoreInsertSetting.run("usd_exchange_rate", "32.5");
-      postRestoreInsertSetting.run("default_buffer_percentage", "20");
-      postRestoreInsertSetting.run("commission_rates", JSON.stringify({
-        "Trendyol": 15, "Hepsiburada": 15, "Amazon": 10, "N11": 15, "Website": 2, "Instagram": 0
-      }));
-      postRestoreInsertSetting.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"]));
-      postRestoreInsertSetting.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
-      postRestoreInsertSetting.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
+      db.pragma("busy_timeout = 5000");
 
-      // We cannot log safely if the schema changed but basically assume success
-      logActivity("DB_RESTORED", "system", "system", { info: "Database restored from backup" });
+      // Re-apply any migrations that older backups might be missing.
+      runMigrations(db);
 
-      res.json({ success: true, message: "Sistem başarıyla yeni veritabanına ve görsel yedeğine geçirildi." });
+      // Seed critical settings that may be absent in older backups.
+      const seed = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
+      seed.run("company_name", "DSDST Panel");
+      seed.run("low_stock_threshold", "50");
+      seed.run("currency_symbol", "₺");
+      seed.run("language", "tr");
+      seed.run("default_buffer_percentage", "20");
+      seed.run("commission_rates", JSON.stringify({ "Trendyol": 15, "Hepsiburada": 15, "Amazon": 10, "N11": 15, "Website": 2, "Instagram": 0 }));
+      seed.run("product_categories", JSON.stringify(["Aliminyum", "PPR", "Dokum Demir", "Karbon Celik"]));
+      seed.run("income_categories", JSON.stringify(["Satış", "İade", "Hizmet Bedeli", "Diğer"]));
+      seed.run("expense_categories", JSON.stringify(["Kargo", "Komisyon", "Maliyet", "Reklam", "Vergi", "Diğer"]));
+
+      logActivity("DB_RESTORED", "system", "system", { restoredBy: (req as any).user?.username, ip: req.ip }, (req as any).user?.id);
+
+      res.json({ success: true, message: "Yedek başarıyla geri yüklendi. Sayfa yenilenebilir." });
     } catch (err: any) {
-      res.status(500).json({ error: "Restore failed: " + err.message });
+      AppLogger.error('RESTORE_ERROR', 'Backup restore failed', err);
+      res.status(500).json({ success: false, error: { code: 'RESTORE_FAILED', message: err.message } });
+    } finally {
+      if (uploadedPath) try { fs.unlinkSync(uploadedPath); } catch (_) {}
+      isRestoring = false;
     }
   });
 
