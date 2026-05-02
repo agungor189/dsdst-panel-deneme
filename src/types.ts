@@ -9,6 +9,7 @@ export interface Product {
   model: string;
   material?: string;
   size?: string;
+  pipe_size?: string;
   connection_type?: string;
   usage_area?: string;
   supplier?: string;

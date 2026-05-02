@@ -72,7 +72,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           COUNT(DISTINCT p.id) as totalSku,
           IFNULL(SUM(vsi.quantity), 0) as totalSoldQty,
           IFNULL(SUM(vsi.unit_price * vsi.quantity), 0) as totalRevenue,
-          (SELECT SUM(quantity) FROM warehouse_stocks w JOIN products p2 ON w.product_id = p2.id WHERE p2.status != 'deleted') as totalStock
+          (SELECT SUM(stock) FROM product_platforms w JOIN products p2 ON w.product_id = p2.id WHERE p2.status != 'deleted') as totalStock
         FROM products p
         ${joinSql}
         WHERE ${where}
@@ -132,7 +132,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           COUNT(DISTINCT p.id) as skuCount,
           IFNULL(SUM(vsi.quantity), 0) as soldQty,
           IFNULL(SUM(vsi.unit_price * vsi.quantity), 0) as revenue,
-          (SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id IN (
+          (SELECT SUM(w.stock) FROM product_platforms w WHERE w.product_id IN (
             SELECT id FROM products p2 
             WHERE IFNULL(p2.normalized_material, 'Bilinmiyor') = IFNULL(p.normalized_material, 'Bilinmiyor') 
               AND IFNULL(p2.normalized_model, 'Bilinmiyor') = IFNULL(p.normalized_model, 'Bilinmiyor')
@@ -165,7 +165,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           IFNULL(p.normalized_model, 'Bilinmiyor') as model,
           COALESCE(p.normalized_pipe_size, p.normalized_size, 'Bilinmiyor') as size,
           IFNULL(p.normalized_tube_type, 'Bilinmiyor') as tubeType,
-          IFNULL((SELECT SUM(w.quantity) FROM warehouse_stocks w WHERE w.product_id = p.id), 0) as currentStock,
+          IFNULL((SELECT SUM(w.stock) FROM product_platforms w WHERE w.product_id = p.id), 0) as currentStock,
           IFNULL(SUM(vsi.quantity), 0) as soldQty,
           IFNULL(SUM(vsi.unit_price * vsi.quantity), 0) as revenue,
           MAX(s.created_at) as lastSaleDate
@@ -194,7 +194,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
           COUNT(DISTINCT p.id) as skuCount,
           IFNULL(SUM(vsi.quantity), 0) as soldQty,
           IFNULL(SUM(vsi.unit_price * vsi.quantity), 0) as revenue,
-          (SELECT SUM(w.quantity) FROM warehouse_stocks w JOIN products p2 ON w.product_id = p2.id WHERE COALESCE(p2.normalized_pipe_size, p2.normalized_size, p2.normalized_material, p2.normalized_model, 'Bilinmiyor') = ${groupCol} OR p2.normalized_material = ${groupCol} OR p2.normalized_model = ${groupCol} OR COALESCE(p2.normalized_pipe_size, p2.normalized_size, 'Bilinmiyor') = ${groupCol}) as currentStock
+          (SELECT SUM(w.stock) FROM product_platforms w JOIN products p2 ON w.product_id = p2.id WHERE COALESCE(p2.normalized_pipe_size, p2.normalized_size, p2.normalized_material, p2.normalized_model, 'Bilinmiyor') = ${groupCol} OR p2.normalized_material = ${groupCol} OR p2.normalized_model = ${groupCol} OR COALESCE(p2.normalized_pipe_size, p2.normalized_size, 'Bilinmiyor') = ${groupCol}) as currentStock
         FROM products p
         ${joinSql}
         WHERE ${where}
@@ -214,7 +214,7 @@ export function createProductAnalyticsRouter(db: Database.Database) {
             IFNULL(SUM(ws.stock), 0) as currentStock
           FROM products p
           ${joinSql}
-          LEFT JOIN (SELECT product_id, SUM(quantity) as stock FROM warehouse_stocks GROUP BY product_id) ws ON ws.product_id = p.id
+          LEFT JOIN (SELECT product_id, SUM(stock) as stock FROM product_platforms GROUP BY product_id) ws ON ws.product_id = p.id
           WHERE ${where}
           GROUP BY name
           ORDER BY soldQty DESC
