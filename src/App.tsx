@@ -60,20 +60,10 @@ function cn(...inputs: ClassValue[]) {
 type View = 'dashboard' | 'products' | 'product-detail' | 'product-wizard' | 'stock' | 'income' | 'expense' | 'recurring' | 'analytics' | 'product-analytics' | 'settings' | 'activity-logs' | 'b2b' | 'sales' | 'api-keys' | 'panel-api' | 'cash';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    try {
-      return !!localStorage.getItem('token');
-    } catch {
-      return false;
-    }
-  });
-  const [userRole, setUserRole] = useState<'admin' | 'user'>(() => {
-    try {
-      return (localStorage.getItem('userRole') as 'admin' | 'user') || 'admin';
-    } catch {
-      return 'admin';
-    }
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  const [userRole, setUserRole] = useState<'admin' | 'user'>('admin');
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -110,10 +100,36 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const { fetchRate } = useCurrency();
+
   useEffect(() => {
-    if (localStorage.getItem('token')) {
-      loadSettings();
-    }
+    const verifyToken = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setIsCheckingAuth(false);
+        return;
+      }
+      try {
+        const res = await api.get('/auth/me');
+        if (res.success) {
+          setIsAuthenticated(true);
+          setUserRole(res.user?.role || 'admin');
+          loadSettings();
+          fetchRate();
+        } else {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userRole');
+        }
+      } catch (err) {
+        console.error("Auth verification failed", err);
+        localStorage.removeItem('token');
+        localStorage.removeItem('userRole');
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+    verifyToken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSettings = async () => {
@@ -124,8 +140,6 @@ export default function App() {
       console.error("Settings load error:", err);
     }
   };
-
-  const { fetchRate } = useCurrency();
 
   const handleLogin = (role: 'admin' | 'user') => {
     setIsAuthenticated(true);
@@ -179,6 +193,14 @@ export default function App() {
   ];
 
   const { viewCurrency, setViewCurrency, activeRate, rateSource, rateFetchedAt, isRateLoading, isRateError, refreshRate } = useCurrency();
+
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;

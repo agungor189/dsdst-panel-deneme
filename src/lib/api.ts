@@ -10,12 +10,13 @@ const checkAccess = () => {
 };
 
 const handleResponse = async (res: Response, skip401Reload = false) => {
-  const isAuthError = res.status === 401;
+  const isAuthError = res.status === 401 || res.status === 403;
   let data;
+  let jsonError = false;
   try {
     data = await res.json();
   } catch (e) {
-    if (!res.ok) throw new Error(res.statusText);
+    jsonError = true;
   }
 
   if (isAuthError && !skip401Reload) {
@@ -23,10 +24,15 @@ const handleResponse = async (res: Response, skip401Reload = false) => {
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     if (hadToken) {
-       window.location.href = '/'; // better than reload to avoid POST refresh
+       window.location.href = '/'; 
+       return; // stop execution
     }
   }
   
+  if (jsonError && !res.ok) {
+    throw new Error(res.statusText || 'Bir hata oluştu');
+  }
+
   if (!res.ok || data?.success === false) {
      throw new Error(data?.error?.message || data?.error || 'Bir hata oluştu');
   }
@@ -38,7 +44,7 @@ export const api = {
     const res = await fetch(`${API_URL}/api${endpoint}`, {
       headers: { "Authorization": `Bearer ${getToken()}` }
     });
-    return handleResponse(res);
+    return handleResponse(res, endpoint.startsWith('/auth/'));
   },
   post: async (endpoint: string, data: any) => {
     if (!endpoint.startsWith('/auth/')) checkAccess();

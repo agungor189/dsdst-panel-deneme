@@ -79,12 +79,6 @@ export const CurrencyProvider = ({ children }: { children: React.ReactNode }) =>
     }
   };
 
-  useEffect(() => {
-    if (localStorage.getItem('token')) {
-      fetchRate();
-    }
-  }, []);
-
   const FormatAmount: React.FC<{
     amount: number;
     originalCurrency?: 'TRY' | 'USD';

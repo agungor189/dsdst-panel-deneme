@@ -747,7 +747,10 @@ async function startServer() {
   // In a strict production environment, you should configure CSP properly.
   app.use(helmet({
     contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+    originAgentCluster: false
   }));
 
   // General Rate Limiting
@@ -760,22 +763,9 @@ async function startServer() {
   });
   app.use(limiter);
 
-  const allowedOrigins = process.env.NODE_ENV === "production" 
-    ? [process.env.FRONTEND_URL || "https://your-production-domain.com"] 
-    : ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"];
-  
   app.use(cors({ 
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      // Log disallowed origins instead of blocking completely during dev
-      if (process.env.NODE_ENV !== "production") {
-        return callback(null, true); 
-      }
-      callback(new Error("CORS policy violation"));
-    }
+    origin: true,
+    credentials: true
   }));
   app.use(express.json({ limit: '10mb' })); // Limit JSON body size
   app.use("/uploads", express.static(uploadsDir, { maxAge: '1d' }));
@@ -3116,15 +3106,6 @@ async function startServer() {
     }
   });
 
-  // Global Error Handler
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    AppLogger.error('REQUEST_ERROR', `Error processing ${req.method} ${req.url}`, err);
-    if (err instanceof z.ZodError) {
-       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.issues } });
-    }
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message || 'Bir hata oluştu' } });
-  });
-
   // --- VITE MIDDLEWARE ---
 
   if (process.env.NODE_ENV !== "production") {
@@ -3140,6 +3121,15 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Global Error Handler must be last!
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    AppLogger.error('REQUEST_ERROR', `Error processing ${req.method} ${req.url}`, err);
+    if (err instanceof z.ZodError) {
+       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.issues } });
+    }
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message || 'Bir hata oluştu' } });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
