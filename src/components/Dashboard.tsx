@@ -406,15 +406,15 @@ export default function Dashboard({ onNavigate, onProductClick, onNavigateAnalyt
                    className="relative group flex flex-col min-w-[0] min-h-[0]"
                    data-grid={{ x: widget.position_x, y: widget.position_y, w: widget.width, h: widget.height, static: !editMode }}
                 >
-                  <div className="flex-1 overflow-hidden min-w-[0] min-h-[0]">
+                  <div className={`flex-1 overflow-hidden min-w-[0] min-h-[0] ${editMode ? 'pointer-events-none' : ''}`}>
                     <WidgetRenderer 
                       widget={widget} 
                       data={data} 
                       m={m} 
                       FormatAmount={FormatAmount} 
-                      onNavigate={onNavigate}
-                      onNavigateAnalytics={onNavigateAnalytics}
-                      onProductClick={onProductClick}
+                      onNavigate={editMode ? undefined : onNavigate}
+                      onNavigateAnalytics={editMode ? undefined : onNavigateAnalytics}
+                      onProductClick={editMode ? undefined : onProductClick}
                       getGrossProfitEstimate={getGrossProfitEstimate}
                       getAvgMarginEstimate={getAvgMarginEstimate}
                     />
