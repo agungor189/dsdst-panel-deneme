@@ -292,6 +292,10 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Trust the first proxy (Cloudflare Tunnel / Nginx) so that req.ip reflects
+  // the real client IP for rate-limiting, not the tunnel's loopback address.
+  app.set('trust proxy', 1);
+
   // Security Headers (Helmet)
   // Disabled Content Security Policy for Vite/React development compatibility.
   // In a strict production environment, you should configure CSP properly.
@@ -445,6 +449,15 @@ async function startServer() {
   });
   app.use("/api/auth/login", loginLimiter);
 
+  const changePasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Çok fazla şifre değiştirme denemesi. 15 dakika sonra tekrar deneyin.' } },
+  });
+  app.use("/api/auth/change-password", changePasswordLimiter);
+
   app.use("/api/auth", authRouter);
 
   // API Authentication Middleware
@@ -460,15 +473,18 @@ async function startServer() {
          (req as any).user = decoded;
          return next();
        } catch (err: any) {
-         console.log("JWT Verification Error:", err.message, "Token:", authHeader.split(' ')[1]);
+         console.log("JWT Verification Error:", err.message);
          return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token.' } });
        }
     }
 
     const apiKeyHeader = req.headers['x-api-key'] || (authHeader && !authHeader.startsWith('Bearer ') ? authHeader : undefined);
     const settingsApiKey = db.prepare("SELECT value FROM settings WHERE key='api_key'").get() as any;
-    
+
     if (settingsApiKey && settingsApiKey.value && apiKeyHeader === settingsApiKey.value) {
+        // Static settings API key grants admin-equivalent access for external integrations.
+        // req.user must be set so that downstream middleware (readonly guard, requireAdmin) works.
+        (req as any).user = { id: 'api_key', username: 'api_key', role: 'admin' };
         return next();
     }
 
@@ -1055,11 +1071,13 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.delete("/api/products", (req, res) => {
-    console.log("Bulk deleting all products...");
+  app.delete("/api/products", requireAdmin, (req, res) => {
+    // Requires explicit confirmation header to prevent accidental mass deletion.
+    if (req.headers['x-confirm-delete-all'] !== 'yes') {
+      return res.status(400).json({ success: false, error: { code: 'CONFIRMATION_REQUIRED', message: 'Tüm ürünleri silmek için x-confirm-delete-all: yes başlığı gerekli.' } });
+    }
     const result = db.prepare("DELETE FROM products").run();
-    console.log(`Deleted ${result.changes} products.`);
-    logActivity('DELETE_ALL', 'product', 'all', { count: result.changes });
+    logActivity('DELETE_ALL', 'product', 'all', { count: result.changes }, (req as any).user?.id);
     res.json({ success: true, deletedCount: result.changes });
   });
 
@@ -1779,58 +1797,6 @@ async function startServer() {
   });
 
   // --- SALES ---
-  app.patch("/api/sales/:id/status", (req, res) => {
-    try {
-      const { status } = req.body;
-      db.transaction(() => {
-        const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(req.params.id) as any;
-        if (!sale) throw new Error("Satış bulunamadı.");
-
-        const oldStatus = sale.status;
-        if (oldStatus === status) return;
-
-        const isCancel = ['İptal Edildi', 'İade Edildi'].includes(status);
-        const wasCancel = ['İptal Edildi', 'İade Edildi'].includes(oldStatus);
-
-        if (!isCancel && wasCancel) {
-          throw new Error("İptal edilmiş bir satış geri alınamaz.");
-        }
-
-        db.prepare("UPDATE sales SET status = ? WHERE id = ?").run(status, req.params.id);
-
-        if (isCancel && !wasCancel) {
-          // Restore stock
-          const items = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(req.params.id) as any[];
-          for (const item of items) {
-            const plat = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? AND platform_name = ?").get(item.product_id, sale.platform) as any;
-            if (plat) {
-              db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE id = ?").run(item.quantity, plat.id);
-            } else {
-              const anyPlat = db.prepare("SELECT * FROM product_platforms WHERE product_id = ? LIMIT 1").get(item.product_id) as any;
-              if (anyPlat) {
-                db.prepare("UPDATE product_platforms SET stock = stock + ? WHERE id = ?").run(item.quantity, anyPlat.id);
-              }
-            }
-            db.prepare("INSERT INTO stock_movements (id, product_id, platform_name, change_amount, reason, type) VALUES (?, ?, ?, ?, ?, ?)")
-              .run(uuidv4(), item.product_id, sale.platform, item.quantity, `Satış iptali (No: ${sale.id})`, 'IN');
-          }
-
-          // Reverse cash transaction
-          const existingCash = db.prepare("SELECT * FROM cash_transactions WHERE source_type = 'sale' AND source_id = ? AND type = 'IN'").get(sale.id) as any;
-          if (existingCash) {
-             db.prepare(`
-               INSERT INTO cash_transactions (id, account_id, type, amount, currency, exchange_rate_at_transaction, source_type, source_id, description)
-               VALUES (?, ?, 'OUT', ?, ?, 1, 'sale_refund', ?, ?)
-             `).run(uuidv4(), existingCash.account_id, existingCash.amount, existingCash.currency, sale.id, `Satış İptali / İade: ${sale.customer_name}`);
-          }
-        }
-      })();
-      res.json({ success: true, message: "Durum güncellendi" });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
   app.get("/api/sales", (req, res) => {
     try {
       const sales = db.prepare("SELECT * FROM sales ORDER BY created_at DESC").all();

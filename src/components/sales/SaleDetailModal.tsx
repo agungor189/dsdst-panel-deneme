@@ -20,9 +20,6 @@ export default function SaleDetailModal({ sale, onClose, onUpdated }: { sale: an
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (formData.status !== sale.status) {
-        await api.patch(`/sales/${sale.id}/status`, { status: formData.status });
-      }
       await api.put(`/sales/${sale.id}`, formData);
       setIsEditing(false);
       onUpdated?.();
